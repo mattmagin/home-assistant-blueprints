@@ -1,0 +1,2968 @@
+blueprint:
+  name: Philips Hue Remote
+  author: mmagin
+  domain: automation
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    version_info:
+      name: Version History
+      description: |-
+        - **2026.08.2: Retarget from the Tap Dial (RDM002) to the Dimmer Switch (RWL022)**
+          - Added: RWL022 event handling for both integrations. ZHA `on_*`/`off_*` commands and Z2M `on_*`/`off_*` actions are normalized to the internal `power_*`/`hue_*` names, and Z2M `recall_0`/`recall_1` are treated as a Hue button short release.
+          - Added: Brightness Control section with a mode selector per brightness button (Brightness Control or Normal Button), a shared Dimming Speed, and a Fallback Lights target.
+          - Added: Brightness buttons dim the lights of whichever button the Last Pressed helper names. A short press applies one step; holding repeats a step every half second until release, capped at 60 steps.
+          - Changed: buttons are now named for their physical function, so every input was renamed from `button_1`–`button_4` to `power`, `up`, `down` and `hue`.
+          - Changed: the Last Pressed helper now stores a button name (`power`/`up`/`down`/`hue`) rather than a digit, so widen it to 5 characters. A button in Brightness Control mode no longer writes to the helper.
+          - Removed: all dial rotation logic, along with the per-button Dimming Speed inputs it used. Dimming Speed is now a single setting in Brightness Control.
+          - Removed: all media player support.
+
+        - **2026.08.1: Fix dial brightness jumping while turning**
+          - Fixed: spurious zero-step rotation messages were consuming the single-mode slot and issuing a brightness_step: 0 call, causing brightness to jump up and down while turning the dial. Added step_size > 0 guard alongside the existing step_size != 255 guard. Also fixes fast custom-action turns dropping clicks for the same reason.
+
+        - **2026.07.1: Fix auto-adjust error when only one of brightness/color temp is enabled**
+          - Fixed: "expected float for brightness_pct" error occurring when Auto-Adjust Brightness is off but Auto-Adjust Color Temperature is on (or vice versa). Replaced `omit` in typed numeric data fields with explicit `choose` branches per button: one call for both fields, one for brightness only, one for color temp only.
+
+        - **2026.06.2: Fix adaptive auto-adjust only working for Button 1**
+          - Fixed: Auto-Adjust now correctly applies to all buttons when multiple adaptive helpers update simultaneously (e.g. lights_bright + lights_dimmed schedulers firing at the same time). Previously, mode:single caused only the first trigger to execute, silently dropping the others. All buttons are now processed in a single automation run, eliminating the race condition.
+
+        - **2026.06.1: Dial color temperature control and double press light mode**
+          - Added: "Color Temperature" option in Rotate Mode, allowing the dial to adjust color temp instead of (or alongside) brightness
+          - Added: Color Temp Speed input per button (1–10 slider), mirroring Dimming Speed to control how fast color temperature changes
+          - Added: Rotate Mode Helper input per button (optional input_text entity that overrides the static Rotate Mode at runtime, enabling toggling between brightness and color temp)
+          - Added: "Toggle Rotate Mode" action option in short release, long release, and double press light mode selectors
+          - Added: Double Press Mode light selector per button (turn_on/turn_off/toggle/toggle_rotate_mode; double press previously had no built-in light mode)
+          - Added: Separate "Auto-Adjust Brightness" and "Auto-Adjust Color Temperature" toggles per button, allowing dial color temperature control to coexist with adaptive/schedule brightness auto-adjust
+          - Added: Button Helpers Configuration setup guide, explaining how to create the required Last Pressed helper and optional Rotate Mode helper, with a YAML example for `buttons.yaml`
+          - Improved: "Dim" option in Rotate Mode renamed to "Brightness" (value `dim` → `brightness`; stored `dim` values are silently ignored, re-save automation to restore rotation if needed)
+          - Breaking: "Auto-Adjust on Value Change" replaced by separate `_brightness` and `_color_temp` toggles, re-enable the relevant toggle(s) if previously active
+
+        - **2026.04.1: Fix template warning in Z2M double-press detection**
+          - Fixed: Added `| default('')` to `value_json.action` in the two `wait_for_trigger` blocks used for double-press detection
+          - Fixed: Silences template variable warning triggered by spurious Z2M MQTT messages (linkquality, battery updates) that don't carry an action field
+
+        - **2026.02.1: Label support, separate brightness/color reset, dial direction fix, Z2M integration tags**
+          - Added: Label targets now work in Light Mode (uses label_entities() to resolve entities)
+          - Added: Separate "Reset Brightness" and "Reset Color Temperature" toggles per button (replaces combined "Reset to Defaults")
+          - Added: Z2M/ZHA integration tags on all custom action inputs so users know which actions are supported per integration
+          - Fixed: Dial rotation direction confusion by switching from parallel to single automation mode
+          - Improved: Z2M double tap detection updated to work with single automation mode (consume wait absorbs the second release)
+          - Breaking: `button_X_short_release_reset` and `button_X_long_release_reset` replaced by `_brightness` and `_color` variants; reconfigure if you previously set these to false
+
+        - **2026.01.3: Fix NoneType division errors in volume control and documentation improvements**
+          - Fixed: Added `| int(0)` filter to all 8 volume_level templates for dial rotation
+          - Fixed: Prevents "TypeError: unsupported operand type(s) for /: 'NoneType' and 'int'" errors
+          - Improved: Matches protective pattern already used in brightness templates
+          - Improved: Added badges and reorganized documentation with better structure
+          - Improved: Moved Version History and Schedule Helper Configuration to collapsed input sections
+
+        - **2026.01.2: Fix NoneType multiplication and division errors in templates**
+          - Fixed: "TypeError: unsupported operand type(s) for *: 'NoneType' and 'int'" errors during dial rotation by adding int(0) default to step_size in brightness calculations
+          - Fixed: "TypeError: unsupported operand type(s) for /: 'NoneType' and 'int'" errors in media volume calculations by adding default(35) to button_X_volume
+          - Improved: All brightness_step calculations now use: (step_size | int(0) * button_X_step_size / 10)
+          - Improved: All current_volume calculations now use: (button_X_volume | default(35)) / 100
+          - Note: These errors occurred in automations created before input defaults were added, or when trigger data doesn't include expected parameters
+
+        - **2026.01.1: Fix Z2M MQTT subscription error for ZHA-only users**
+          - Fixed: Z2M MQTT subscription errors when using ZHA-only configuration
+          - Improved: Conditional MQTT trigger based on integration selection
+
+        - **2025.12.2: Add adaptive lighting support to Philips Hue Tap Dial blueprint**
+          - Added: Adaptive lighting mode with schedule helper and sensor integration
+          - Added: Auto-adjust feature for automatic light updates on schedule changes
+          - Enhanced: Support for brightness and color temperature from schedules and sensors
+
+        - **2025.12.1: Major update - Z2M support, Auto-Adjust, Reset to Defaults, Dimming Speed**
+          - Added: Zigbee2MQTT (Z2M) integration support alongside ZHA
+          - Added: Auto-adjust lights when schedule changes
+          - Added: Reset to defaults button action
+          - Added: Configurable dimming speed per button
+          - Improved: Documentation and organization
+
+        - **2025.04.0: Change variables to be unique per button**
+          - Changed: Made all variables unique per button for better isolation
+
+        - **2025.02.0: Big v2 update with a lot of changes**
+          - Major: Complete rewrite with many new features and improvements
+
+        - **2025.01.1: Lights mode without schedules, cleanup of old syntax**
+          - Added: Lights mode without requiring schedules
+          - Improved: Code cleanup and syntax updates
+
+        - **2025.01.0: Initial Version**
+          - First release with basic Philips Hue Tap Dial Switch support
+      icon: mdi:history
+      collapsed: true
+      input: {}
+    button_helpers_info:
+      name: Button Helpers Configuration
+      description: |-
+        One `input_text` helper is used by this blueprint.
+
+        ### Setting up Packages (Optional)
+        Organize helpers into packages for easier management. Create a `packages` folder in `/config/` and add to your configuration:
+
+        ```yaml
+        homeassistant:
+          packages: !include_dir_named packages
+        ```
+
+        ### Last Pressed Helper (Required)
+        Stores the name of the button that was last pressed: `power`, `up`, `down` or `hue`.
+        When a brightness button is held or pressed, it dims the lights belonging to the button
+        named here. **Each switch requires its own unique helper.**
+
+        A button in Brightness Control mode never writes to this helper, so dimming does not
+        steal the target away from the button whose lights you are adjusting. That means the
+        helper normally alternates between `power` and `hue`.
+
+        Until a button has been pressed the helper is empty, and dimming falls back to the
+        Fallback Lights target, or to the Power button's lights if that is also empty.
+
+        ### YAML Example
+        Create `/config/packages/buttons.yaml`:
+
+        ```yaml
+        input_text:
+          living_room_button_last_pressed:
+            name: "Living Room Button Last Pressed"
+            icon: mdi:gesture-tap-button
+            min: 0
+            max: 5
+            mode: text
+            pattern: "power|up|down|hue"
+        ```
+      icon: mdi:gesture-tap-button
+      collapsed: true
+      input: {}
+    schedule_helper_info:
+      name: Schedule Helper Configuration
+      description: |-
+        Create time-based brightness and color adjustments using Home Assistant schedule helpers.
+
+        ### Setting up Packages (Optional)
+        Organize schedules into packages for easier management. Create a `packages` folder in `/config/` and add to your configuration:
+
+        ```yaml
+        homeassistant:
+          packages: !include_dir_named packages
+        ```
+
+        ### Schedule YAML Example
+        Create `/config/packages/lights.yaml` with your schedules:
+
+        ```yaml
+        schedule:
+          lights_bright:
+            name: "Lights Bright"
+            icon: mdi:lightbulb-auto
+            monday:
+              - from: "00:00:00"
+                to: "09:00:00"
+                data:
+                  brightness_pct: 30
+                  color_temp_kelvin: 3333
+              - from: "09:00:00"
+                to: "23:00:00"
+                data:
+                  brightness_pct: 90
+                  color_temp_kelvin: 3333
+              - from: "23:00:00"
+                to: "24:00:00"
+                data:
+                  brightness_pct: 30
+                  color_temp_kelvin: 3333
+            # Repeat pattern for tuesday through sunday
+        ```
+
+        You can create multiple schedules with different brightness levels (e.g., `lights_bright` and `lights_dimmed`) for different scenarios.
+
+        ### Schedule Flexibility
+
+        **Optional Fields:** If a schedule lacks certain data fields (like `transition`), the blueprint reverts to default values configured in the automation. This allows selective override of specific parameters while maintaining other preset defaults.
+
+        **Supported Schedule Attributes:**
+        - `brightness_pct`: Brightness percentage (0-100)
+        - `color_temp_kelvin`: Color temperature in Kelvin
+        - `transition`: Optional transition time in seconds
+
+        ### Auto-Adjust Feature
+
+        When enabled, the blueprint automatically updates lights when the schedule changes (e.g., when moving from morning to afternoon time block):
+        - Only affects lights that are currently ON
+        - Configurable transition duration (default: 5 minutes)
+        - Applies current schedule's brightness and color temperature
+        - Can be enabled/disabled per button
+      icon: mdi:calendar-clock
+      collapsed: true
+      input: {}
+    integration_type:
+      name: Integration Type
+      description: |-
+        `required`
+
+        Select which integration(s) to use for the Philips Hue Dimmer Switch. You can select Z2M, ZHA, or both.
+      default: []
+      selector:
+        select:
+          options:
+            - label: Zigbee2MQTT (Z2M)
+              value: z2m
+            - label: Zigbee Home Automation (ZHA)
+              value: zha
+          multiple: true
+    z2m:
+      name: Zigbee2MQTT (Z2M)
+      description: Configure Zigbee2MQTT integration settings.
+      icon: mdi:zigbee
+      collapsed: true
+      input:
+        z2m_base_topic:
+          name: Base Topic
+          description: |-
+            `optional` `text`
+
+            MQTT base topic for Zigbee2MQTT installation (usually `zigbee2mqtt`). Leave empty if not using Z2M.
+          default: ""
+          selector:
+            text: {}
+        z2m_device_name:
+          name: Device Friendly Name
+          description: |-
+            `optional` `text`
+
+            Friendly name of your Philips Hue Dimmer Switch in Z2M (case-sensitive, as shown in Z2M UI). Leave empty if not using Z2M.
+          default: ""
+          selector:
+            text: {}
+    zha:
+      name: Zigbee Home Automation (ZHA)
+      description: Configure ZHA integration settings.
+      icon: mdi:zigbee
+      collapsed: true
+      input:
+        zha_remote:
+          name: Remote Device (ZHA)
+          description: |-
+            `optional` `device`
+
+            Select the Philips Hue Dimmer Switch device from ZHA. Leave empty if not using ZHA.
+          default: {}
+          selector:
+            device:
+              entity:
+                - domain:
+                    - sensor
+                  device_class:
+                    - battery
+              filter:
+                - integration: zha
+                  manufacturer: Signify Netherlands B.V.
+                  model: RWL022
+              multiple: false
+    last_pressed:
+      name: Last Pressed Input Text Helper
+      description: |-
+        `required` `entity`
+
+        Create an input text helper within Home Assistant to keep track
+        of the last button pressed. It stores `power`, `up`, `down` or `hue`, and the
+        brightness buttons use it to decide which lights to dim.
+        **Each switch requires a unique helper!**
+      selector:
+        entity:
+          filter:
+            - domain:
+                - input_text
+          multiple: false
+    brightness_control:
+      name: Brightness Control
+      description: Configure what the Brightness Up and Brightness Down buttons do.
+      icon: mdi:brightness-6
+      collapsed: true
+      input:
+        up_button_mode:
+          name: Brightness Up Button Mode
+          description: |-
+            `optional` `select`
+
+            **Brightness Control**: the button dims the lights of whichever button was last
+            pressed, tracked by the Last Pressed helper. Its own Light Mode actions are ignored.
+
+            **Normal Button**: the button behaves like the Power and Hue buttons, running its
+            own Light Mode actions and becoming the new Last Pressed target.
+          default: brightness
+          selector:
+            select:
+              options:
+                - label: Brightness Control
+                  value: brightness
+                - label: Normal Button
+                  value: normal
+              custom_value: false
+              multiple: false
+        down_button_mode:
+          name: Brightness Down Button Mode
+          description: |-
+            `optional` `select`
+
+            **Brightness Control**: the button dims the lights of whichever button was last
+            pressed, tracked by the Last Pressed helper. Its own Light Mode actions are ignored.
+
+            **Normal Button**: the button behaves like the Power and Hue buttons, running its
+            own Light Mode actions and becoming the new Last Pressed target.
+          default: brightness
+          selector:
+            select:
+              options:
+                - label: Brightness Control
+                  value: brightness
+                - label: Normal Button
+                  value: normal
+              custom_value: false
+              multiple: false
+        brightness_speed:
+          name: Dimming Speed
+          description: |-
+            `optional` `number`
+
+            How much brightness changes per step (1=slowest/smoothest, 10=fastest/jumpiest).
+            A short press applies one step; holding repeats a step every half second.
+            At the default of 5, holding sweeps the full range in about five seconds.
+          default: 5
+          selector:
+            number:
+              min: 1
+              max: 10
+              step: 1
+              mode: slider
+        brightness_fallback_light:
+          name: Fallback Lights
+          description: |-
+            `optional` `target`
+
+            Lights to dim when the Last Pressed helper is empty or holds an unexpected value,
+            which is the case until a button has been pressed. Leave empty to fall back to the
+            Power button's lights instead.
+          default: []
+          selector:
+            target:
+              entity:
+                - domain:
+                    - light
+    power_custom:
+      name: Power Button - Custom Actions
+      icon: mdi:power
+      collapsed: true
+      input:
+        power_press:
+          name: Short Press
+          description: |-
+            `optional` `action` `ZHA`
+
+            Action to run on a short press of the Power button.
+          default: []
+          selector:
+            action: {}
+        power_short_release:
+          name: Short Release
+          description: |-
+            `optional` `action` `Z2M` `ZHA`
+
+            Action to run on a release of the Power button after a short press.
+          default: []
+          selector:
+            action: {}
+        power_hold:
+          name: Long Press
+          description: |-
+            `optional` `action` `Z2M` `ZHA`
+
+            Action to run on a long press of the Power button. Will repeat while the button is held.
+          default: []
+          selector:
+            action: {}
+        power_long_release:
+          name: Long Release
+          description: |-
+            `optional` `action` `Z2M` `ZHA`
+
+            Action to run when the Power button is released after a long press.
+          default: []
+          selector:
+            action: {}
+        power_double:
+          name: Double Press
+          description: |-
+            `optional` `action` `Z2M` `ZHA`
+
+            Action to run on a double press of the Power button.
+          default: []
+          selector:
+            action: {}
+    power_light:
+      name: Power Button - Light Mode
+      icon: mdi:lightbulb
+      collapsed: true
+      input:
+        power_light:
+          name: Lights
+          description: |-
+            `optional` `target`
+
+            The lights to control with this button.
+          default: []
+          selector:
+            target:
+              entity:
+                - domain:
+                    - light
+        power_short_release_light_mode:
+          name: Short Release Mode
+          description: |-
+            `optional` `select`
+
+            Light actions for short release. Multiple selections trigger simultaneously.
+          default: turn_on
+          selector:
+            select:
+              options:
+                - label: Turn On
+                  value: turn_on
+                - label: Turn Off
+                  value: turn_off
+                - label: Toggle
+                  value: toggle
+              custom_value: false
+              multiple: true
+        power_long_release_light_mode:
+          name: Long Release Mode
+          description: |-
+            `optional` `select`
+
+            Light actions for long release. Multiple selections trigger simultaneously.
+          default: turn_off
+          selector:
+            select:
+              options:
+                - label: Turn On
+                  value: turn_on
+                - label: Turn Off
+                  value: turn_off
+                - label: Toggle
+                  value: toggle
+              custom_value: false
+              multiple: true
+        power_double_light_mode:
+          name: Double Press Mode
+          description: |-
+            `optional` `select`
+
+            Light actions for double press. Multiple selections trigger simultaneously.
+          default: []
+          selector:
+            select:
+              options:
+                - label: Turn On
+                  value: turn_on
+                - label: Turn Off
+                  value: turn_off
+                - label: Toggle
+                  value: toggle
+              custom_value: false
+              multiple: true
+    power_light_settings:
+      name: Power Button - Light Mode Settings
+      icon: mdi:cog
+      collapsed: true
+      input:
+        power_light_adjustment_mode:
+          name: Light Adjustment Mode
+          description: |-
+            `optional` `select`
+
+            Choose where brightness and color temperature values come from:
+            - **Static**: Use the default values configured below
+            - **Adaptive**: Use input_number helpers updated by the Adaptive Lighting Scheduler blueprint
+            - **Schedule**: Use a schedule entity for time-based adjustments
+          default: static
+          selector:
+            select:
+              options:
+                - label: Static
+                  value: static
+                - label: Adaptive
+                  value: adaptive
+                - label: Schedule
+                  value: schedule
+              multiple: false
+        power_light_brightness:
+          name: Default Brightness
+          description: |-
+            `optional` `number`
+
+            Default brightness percentage (fallback when adaptive/schedule is not set or lacks this attribute).
+          default: 100
+          selector:
+            number:
+              min: 0
+              max: 100
+              step: 5
+              unit_of_measurement: "%"
+              mode: slider
+        power_light_color:
+          name: Default Color Temperature
+          description: |-
+            `optional` `color_temp`
+
+            Default color temperature in Kelvin (fallback when adaptive/schedule is not set or lacks this attribute).
+          default: 3333
+          selector:
+            color_temp:
+              unit: kelvin
+              min: 2000
+        power_light_transition:
+          name: Default Transition
+          description: |-
+            `optional` `number`
+
+            Default transition duration in seconds (fallback when schedule is not set or lacks this attribute).
+          default: 1
+          selector:
+            number:
+              min: 0
+              max: 10
+              step: 1
+              mode: slider
+        power_light_adaptive_brightness:
+          name: Adaptive Brightness Helper
+          description: |-
+            `optional` `entity`
+
+            Input number helper containing adaptive brightness (0-100). Only used when Light Adjustment Mode is "Adaptive".
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain:
+                    - input_number
+              multiple: false
+        power_light_adaptive_color_temp:
+          name: Adaptive Color Temperature Helper
+          description: |-
+            `optional` `entity`
+
+            Input number helper containing adaptive color temperature in Kelvin. Only used when Light Adjustment Mode is "Adaptive".
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain:
+                    - input_number
+              multiple: false
+        power_light_schedule:
+          name: Schedule Helper
+          description: |-
+            `optional` `entity`
+
+            Schedule helper for time-based brightness and color adjustments. Only used when Light Adjustment Mode is "Schedule". **Schedules can be reused between lights.**
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain:
+                    - schedule
+              multiple: false
+        power_light_auto_adjust_brightness:
+          name: Auto-Adjust Brightness on Value Change
+          description: |-
+            `optional` `boolean`
+
+            Automatically update light brightness when adaptive or schedule values change. Only affects currently on lights.
+          default: false
+          selector:
+            boolean: {}
+        power_light_auto_adjust_color_temp:
+          name: Auto-Adjust Color Temperature on Value Change
+          description: |-
+            `optional` `boolean`
+
+            Automatically update light color temperature when adaptive or schedule values change. Only affects currently on lights.
+          default: false
+          selector:
+            boolean: {}
+        power_light_auto_adjust_transition:
+          name: Auto-Adjust Transition
+          description: |-
+            `optional` `number`
+
+            Transition duration in seconds when auto-adjusting lights.
+          default: 300
+          selector:
+            number:
+              min: 0
+              max: 600
+              step: 30
+              unit_of_measurement: s
+              mode: slider
+        power_short_release_reset_brightness:
+          name: Reset Brightness on Short Release
+          description: |-
+            `optional` `boolean`
+
+            Apply the default brightness value when turning on. Disable to maintain current brightness.
+          default: true
+          selector:
+            boolean: {}
+        power_short_release_reset_color:
+          name: Reset Color Temperature on Short Release
+          description: |-
+            `optional` `boolean`
+
+            Apply the default color temperature when turning on. Disable to maintain current color temperature.
+          default: true
+          selector:
+            boolean: {}
+        power_long_release_reset_brightness:
+          name: Reset Brightness on Long Release
+          description: |-
+            `optional` `boolean`
+
+            Apply the default brightness value on long release. Disable to maintain current brightness.
+          default: true
+          selector:
+            boolean: {}
+        power_long_release_reset_color:
+          name: Reset Color Temperature on Long Release
+          description: |-
+            `optional` `boolean`
+
+            Apply the default color temperature on long release. Disable to maintain current color temperature.
+          default: true
+          selector:
+            boolean: {}
+    up_custom:
+      name: Brightness Up Button - Custom Actions
+      icon: mdi:arrow-up-bold
+      collapsed: true
+      input:
+        up_press:
+          name: Short Press
+          description: |-
+            `optional` `action` `ZHA`
+
+            Action to run on a short press of the Brightness Up button.
+          default: []
+          selector:
+            action: {}
+        up_short_release:
+          name: Short Release
+          description: |-
+            `optional` `action` `Z2M` `ZHA`
+
+            Action to run on a release of the Brightness Up button after a short press.
+          default: []
+          selector:
+            action: {}
+        up_hold:
+          name: Long Press
+          description: |-
+            `optional` `action` `Z2M` `ZHA`
+
+            Action to run on a long press of the Brightness Up button. Will repeat while the button is held.
+          default: []
+          selector:
+            action: {}
+        up_long_release:
+          name: Long Release
+          description: |-
+            `optional` `action` `Z2M` `ZHA`
+
+            Action to run when the Brightness Up button is released after a long press.
+          default: []
+          selector:
+            action: {}
+        up_double:
+          name: Double Press
+          description: |-
+            `optional` `action` `Z2M` `ZHA`
+
+            Action to run on a double press of the Brightness Up button.
+          default: []
+          selector:
+            action: {}
+    up_light:
+      name: Brightness Up Button - Light Mode
+      icon: mdi:lightbulb
+      collapsed: true
+      input:
+        up_light:
+          name: Lights
+          description: |-
+            `optional` `target`
+
+            The lights to control with this button.
+          default: []
+          selector:
+            target:
+              entity:
+                - domain:
+                    - light
+        up_short_release_light_mode:
+          name: Short Release Mode
+          description: |-
+            `optional` `select`
+
+            Light actions for short release. Multiple selections trigger simultaneously.
+          default: turn_on
+          selector:
+            select:
+              options:
+                - label: Turn On
+                  value: turn_on
+                - label: Turn Off
+                  value: turn_off
+                - label: Toggle
+                  value: toggle
+              custom_value: false
+              multiple: true
+        up_long_release_light_mode:
+          name: Long Release Mode
+          description: |-
+            `optional` `select`
+
+            Light actions for long release. Multiple selections trigger simultaneously.
+          default: turn_off
+          selector:
+            select:
+              options:
+                - label: Turn On
+                  value: turn_on
+                - label: Turn Off
+                  value: turn_off
+                - label: Toggle
+                  value: toggle
+              custom_value: false
+              multiple: true
+        up_double_light_mode:
+          name: Double Press Mode
+          description: |-
+            `optional` `select`
+
+            Light actions for double press. Multiple selections trigger simultaneously.
+          default: []
+          selector:
+            select:
+              options:
+                - label: Turn On
+                  value: turn_on
+                - label: Turn Off
+                  value: turn_off
+                - label: Toggle
+                  value: toggle
+              custom_value: false
+              multiple: true
+    up_light_settings:
+      name: Brightness Up Button - Light Mode Settings
+      icon: mdi:cog
+      collapsed: true
+      input:
+        up_light_adjustment_mode:
+          name: Light Adjustment Mode
+          description: |-
+            `optional` `select`
+
+            Choose where brightness and color temperature values come from:
+            - **Static**: Use the default values configured below
+            - **Adaptive**: Use input_number helpers updated by the Adaptive Lighting Scheduler blueprint
+            - **Schedule**: Use a schedule entity for time-based adjustments
+          default: static
+          selector:
+            select:
+              options:
+                - label: Static
+                  value: static
+                - label: Adaptive
+                  value: adaptive
+                - label: Schedule
+                  value: schedule
+              multiple: false
+        up_light_brightness:
+          name: Default Brightness
+          description: |-
+            `optional` `number`
+
+            Default brightness percentage (fallback when adaptive/schedule is not set or lacks this attribute).
+          default: 100
+          selector:
+            number:
+              min: 0
+              max: 100
+              step: 5
+              unit_of_measurement: "%"
+              mode: slider
+        up_light_color:
+          name: Default Color Temperature
+          description: |-
+            `optional` `color_temp`
+
+            Default color temperature in Kelvin (fallback when adaptive/schedule is not set or lacks this attribute).
+          default: 3333
+          selector:
+            color_temp:
+              unit: kelvin
+              min: 2000
+        up_light_transition:
+          name: Default Transition
+          description: |-
+            `optional` `number`
+
+            Default transition duration in seconds (fallback when schedule is not set or lacks this attribute).
+          default: 1
+          selector:
+            number:
+              min: 0
+              max: 10
+              step: 1
+              mode: slider
+        up_light_adaptive_brightness:
+          name: Adaptive Brightness Helper
+          description: |-
+            `optional` `entity`
+
+            Input number helper containing adaptive brightness (0-100). Only used when Light Adjustment Mode is "Adaptive".
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain:
+                    - input_number
+              multiple: false
+        up_light_adaptive_color_temp:
+          name: Adaptive Color Temperature Helper
+          description: |-
+            `optional` `entity`
+
+            Input number helper containing adaptive color temperature in Kelvin. Only used when Light Adjustment Mode is "Adaptive".
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain:
+                    - input_number
+              multiple: false
+        up_light_schedule:
+          name: Schedule Helper
+          description: |-
+            `optional` `entity`
+
+            Schedule helper for time-based brightness and color adjustments. Only used when Light Adjustment Mode is "Schedule". **Schedules can be reused between lights.**
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain:
+                    - schedule
+              multiple: false
+        up_light_auto_adjust_brightness:
+          name: Auto-Adjust Brightness on Value Change
+          description: |-
+            `optional` `boolean`
+
+            Automatically update light brightness when adaptive or schedule values change. Only affects currently on lights.
+          default: false
+          selector:
+            boolean: {}
+        up_light_auto_adjust_color_temp:
+          name: Auto-Adjust Color Temperature on Value Change
+          description: |-
+            `optional` `boolean`
+
+            Automatically update light color temperature when adaptive or schedule values change. Only affects currently on lights.
+          default: false
+          selector:
+            boolean: {}
+        up_light_auto_adjust_transition:
+          name: Auto-Adjust Transition
+          description: |-
+            `optional` `number`
+
+            Transition duration in seconds when auto-adjusting lights.
+          default: 300
+          selector:
+            number:
+              min: 0
+              max: 600
+              step: 30
+              unit_of_measurement: s
+              mode: slider
+        up_short_release_reset_brightness:
+          name: Reset Brightness on Short Release
+          description: |-
+            `optional` `boolean`
+
+            Apply the default brightness value when turning on. Disable to maintain current brightness.
+          default: true
+          selector:
+            boolean: {}
+        up_short_release_reset_color:
+          name: Reset Color Temperature on Short Release
+          description: |-
+            `optional` `boolean`
+
+            Apply the default color temperature when turning on. Disable to maintain current color temperature.
+          default: true
+          selector:
+            boolean: {}
+        up_long_release_reset_brightness:
+          name: Reset Brightness on Long Release
+          description: |-
+            `optional` `boolean`
+
+            Apply the default brightness value on long release. Disable to maintain current brightness.
+          default: true
+          selector:
+            boolean: {}
+        up_long_release_reset_color:
+          name: Reset Color Temperature on Long Release
+          description: |-
+            `optional` `boolean`
+
+            Apply the default color temperature on long release. Disable to maintain current color temperature.
+          default: true
+          selector:
+            boolean: {}
+    down_custom:
+      name: Brightness Down Button - Custom Actions
+      icon: mdi:arrow-down-bold
+      collapsed: true
+      input:
+        down_press:
+          name: Short Press
+          description: |-
+            `optional` `action` `ZHA`
+
+            Action to run on a short press of the Brightness Down button.
+          default: []
+          selector:
+            action: {}
+        down_short_release:
+          name: Short Release
+          description: |-
+            `optional` `action` `Z2M` `ZHA`
+
+            Action to run on a release of the Brightness Down button after a short press.
+          default: []
+          selector:
+            action: {}
+        down_hold:
+          name: Long Press
+          description: |-
+            `optional` `action` `Z2M` `ZHA`
+
+            Action to run on a long press of the Brightness Down button. Will repeat while the button is held.
+          default: []
+          selector:
+            action: {}
+        down_long_release:
+          name: Long Release
+          description: |-
+            `optional` `action` `Z2M` `ZHA`
+
+            Action to run when the Brightness Down button is released after a long press.
+          default: []
+          selector:
+            action: {}
+        down_double:
+          name: Double Press
+          description: |-
+            `optional` `action` `Z2M` `ZHA`
+
+            Action to run on a double press of the Brightness Down button.
+          default: []
+          selector:
+            action: {}
+    down_light:
+      name: Brightness Down Button - Light Mode
+      icon: mdi:lightbulb
+      collapsed: true
+      input:
+        down_light:
+          name: Lights
+          description: |-
+            `optional` `target`
+
+            The lights to control with this button.
+          default: []
+          selector:
+            target:
+              entity:
+                - domain:
+                    - light
+        down_short_release_light_mode:
+          name: Short Release Mode
+          description: |-
+            `optional` `select`
+
+            Light actions for short release. Multiple selections trigger simultaneously.
+          default: turn_on
+          selector:
+            select:
+              options:
+                - label: Turn On
+                  value: turn_on
+                - label: Turn Off
+                  value: turn_off
+                - label: Toggle
+                  value: toggle
+              custom_value: false
+              multiple: true
+        down_long_release_light_mode:
+          name: Long Release Mode
+          description: |-
+            `optional` `select`
+
+            Light actions for long release. Multiple selections trigger simultaneously.
+          default: turn_off
+          selector:
+            select:
+              options:
+                - label: Turn On
+                  value: turn_on
+                - label: Turn Off
+                  value: turn_off
+                - label: Toggle
+                  value: toggle
+              custom_value: false
+              multiple: true
+        down_double_light_mode:
+          name: Double Press Mode
+          description: |-
+            `optional` `select`
+
+            Light actions for double press. Multiple selections trigger simultaneously.
+          default: []
+          selector:
+            select:
+              options:
+                - label: Turn On
+                  value: turn_on
+                - label: Turn Off
+                  value: turn_off
+                - label: Toggle
+                  value: toggle
+              custom_value: false
+              multiple: true
+    down_light_settings:
+      name: Brightness Down Button - Light Mode Settings
+      icon: mdi:cog
+      collapsed: true
+      input:
+        down_light_adjustment_mode:
+          name: Light Adjustment Mode
+          description: |-
+            `optional` `select`
+
+            Choose where brightness and color temperature values come from:
+            - **Static**: Use the default values configured below
+            - **Adaptive**: Use input_number helpers updated by the Adaptive Lighting Scheduler blueprint
+            - **Schedule**: Use a schedule entity for time-based adjustments
+          default: static
+          selector:
+            select:
+              options:
+                - label: Static
+                  value: static
+                - label: Adaptive
+                  value: adaptive
+                - label: Schedule
+                  value: schedule
+              multiple: false
+        down_light_brightness:
+          name: Default Brightness
+          description: |-
+            `optional` `number`
+
+            Default brightness percentage (fallback when adaptive/schedule is not set or lacks this attribute).
+          default: 100
+          selector:
+            number:
+              min: 0
+              max: 100
+              step: 5
+              unit_of_measurement: "%"
+              mode: slider
+        down_light_color:
+          name: Default Color Temperature
+          description: |-
+            `optional` `color_temp`
+
+            Default color temperature in Kelvin (fallback when adaptive/schedule is not set or lacks this attribute).
+          default: 3333
+          selector:
+            color_temp:
+              unit: kelvin
+              min: 2000
+        down_light_transition:
+          name: Default Transition
+          description: |-
+            `optional` `number`
+
+            Default transition duration in seconds (fallback when schedule is not set or lacks this attribute).
+          default: 1
+          selector:
+            number:
+              min: 0
+              max: 10
+              step: 1
+              mode: slider
+        down_light_adaptive_brightness:
+          name: Adaptive Brightness Helper
+          description: |-
+            `optional` `entity`
+
+            Input number helper containing adaptive brightness (0-100). Only used when Light Adjustment Mode is "Adaptive".
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain:
+                    - input_number
+              multiple: false
+        down_light_adaptive_color_temp:
+          name: Adaptive Color Temperature Helper
+          description: |-
+            `optional` `entity`
+
+            Input number helper containing adaptive color temperature in Kelvin. Only used when Light Adjustment Mode is "Adaptive".
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain:
+                    - input_number
+              multiple: false
+        down_light_schedule:
+          name: Schedule Helper
+          description: |-
+            `optional` `entity`
+
+            Schedule helper for time-based brightness and color adjustments. Only used when Light Adjustment Mode is "Schedule". **Schedules can be reused between lights.**
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain:
+                    - schedule
+              multiple: false
+        down_light_auto_adjust_brightness:
+          name: Auto-Adjust Brightness on Value Change
+          description: |-
+            `optional` `boolean`
+
+            Automatically update light brightness when adaptive or schedule values change. Only affects currently on lights.
+          default: false
+          selector:
+            boolean: {}
+        down_light_auto_adjust_color_temp:
+          name: Auto-Adjust Color Temperature on Value Change
+          description: |-
+            `optional` `boolean`
+
+            Automatically update light color temperature when adaptive or schedule values change. Only affects currently on lights.
+          default: false
+          selector:
+            boolean: {}
+        down_light_auto_adjust_transition:
+          name: Auto-Adjust Transition
+          description: |-
+            `optional` `number`
+
+            Transition duration in seconds when auto-adjusting lights.
+          default: 300
+          selector:
+            number:
+              min: 0
+              max: 600
+              step: 30
+              unit_of_measurement: s
+              mode: slider
+        down_short_release_reset_brightness:
+          name: Reset Brightness on Short Release
+          description: |-
+            `optional` `boolean`
+
+            Apply the default brightness value when turning on. Disable to maintain current brightness.
+          default: true
+          selector:
+            boolean: {}
+        down_short_release_reset_color:
+          name: Reset Color Temperature on Short Release
+          description: |-
+            `optional` `boolean`
+
+            Apply the default color temperature when turning on. Disable to maintain current color temperature.
+          default: true
+          selector:
+            boolean: {}
+        down_long_release_reset_brightness:
+          name: Reset Brightness on Long Release
+          description: |-
+            `optional` `boolean`
+
+            Apply the default brightness value on long release. Disable to maintain current brightness.
+          default: true
+          selector:
+            boolean: {}
+        down_long_release_reset_color:
+          name: Reset Color Temperature on Long Release
+          description: |-
+            `optional` `boolean`
+
+            Apply the default color temperature on long release. Disable to maintain current color temperature.
+          default: true
+          selector:
+            boolean: {}
+    hue_custom:
+      name: Hue Button - Custom Actions
+      icon: mdi:palette
+      collapsed: true
+      input:
+        hue_press:
+          name: Short Press
+          description: |-
+            `optional` `action` `ZHA`
+
+            Action to run on a short press of the Hue button.
+          default: []
+          selector:
+            action: {}
+        hue_short_release:
+          name: Short Release
+          description: |-
+            `optional` `action` `Z2M` `ZHA`
+
+            Action to run on a release of the Hue button after a short press.
+          default: []
+          selector:
+            action: {}
+        hue_hold:
+          name: Long Press
+          description: |-
+            `optional` `action` `Z2M` `ZHA`
+
+            Action to run on a long press of the Hue button. Will repeat while the button is held.
+          default: []
+          selector:
+            action: {}
+        hue_long_release:
+          name: Long Release
+          description: |-
+            `optional` `action` `Z2M` `ZHA`
+
+            Action to run when the Hue button is released after a long press.
+          default: []
+          selector:
+            action: {}
+        hue_double:
+          name: Double Press
+          description: |-
+            `optional` `action` `Z2M` `ZHA`
+
+            Action to run on a double press of the Hue button.
+          default: []
+          selector:
+            action: {}
+    hue_light:
+      name: Hue Button - Light Mode
+      icon: mdi:lightbulb
+      collapsed: true
+      input:
+        hue_light:
+          name: Lights
+          description: |-
+            `optional` `target`
+
+            The lights to control with this button.
+          default: []
+          selector:
+            target:
+              entity:
+                - domain:
+                    - light
+        hue_short_release_light_mode:
+          name: Short Release Mode
+          description: |-
+            `optional` `select`
+
+            Light actions for short release. Multiple selections trigger simultaneously.
+          default: turn_on
+          selector:
+            select:
+              options:
+                - label: Turn On
+                  value: turn_on
+                - label: Turn Off
+                  value: turn_off
+                - label: Toggle
+                  value: toggle
+              custom_value: false
+              multiple: true
+        hue_long_release_light_mode:
+          name: Long Release Mode
+          description: |-
+            `optional` `select`
+
+            Light actions for long release. Multiple selections trigger simultaneously.
+          default: turn_off
+          selector:
+            select:
+              options:
+                - label: Turn On
+                  value: turn_on
+                - label: Turn Off
+                  value: turn_off
+                - label: Toggle
+                  value: toggle
+              custom_value: false
+              multiple: true
+        hue_double_light_mode:
+          name: Double Press Mode
+          description: |-
+            `optional` `select`
+
+            Light actions for double press. Multiple selections trigger simultaneously.
+          default: []
+          selector:
+            select:
+              options:
+                - label: Turn On
+                  value: turn_on
+                - label: Turn Off
+                  value: turn_off
+                - label: Toggle
+                  value: toggle
+              custom_value: false
+              multiple: true
+    hue_light_settings:
+      name: Hue Button - Light Mode Settings
+      icon: mdi:cog
+      collapsed: true
+      input:
+        hue_light_adjustment_mode:
+          name: Light Adjustment Mode
+          description: |-
+            `optional` `select`
+
+            Choose where brightness and color temperature values come from:
+            - **Static**: Use the default values configured below
+            - **Adaptive**: Use input_number helpers updated by the Adaptive Lighting Scheduler blueprint
+            - **Schedule**: Use a schedule entity for time-based adjustments
+          default: static
+          selector:
+            select:
+              options:
+                - label: Static
+                  value: static
+                - label: Adaptive
+                  value: adaptive
+                - label: Schedule
+                  value: schedule
+              multiple: false
+        hue_light_brightness:
+          name: Default Brightness
+          description: |-
+            `optional` `number`
+
+            Default brightness percentage (fallback when adaptive/schedule is not set or lacks this attribute).
+          default: 100
+          selector:
+            number:
+              min: 0
+              max: 100
+              step: 5
+              unit_of_measurement: "%"
+              mode: slider
+        hue_light_color:
+          name: Default Color Temperature
+          description: |-
+            `optional` `color_temp`
+
+            Default color temperature in Kelvin (fallback when adaptive/schedule is not set or lacks this attribute).
+          default: 3333
+          selector:
+            color_temp:
+              unit: kelvin
+              min: 2000
+        hue_light_transition:
+          name: Default Transition
+          description: |-
+            `optional` `number`
+
+            Default transition duration in seconds (fallback when schedule is not set or lacks this attribute).
+          default: 1
+          selector:
+            number:
+              min: 0
+              max: 10
+              step: 1
+              mode: slider
+        hue_light_adaptive_brightness:
+          name: Adaptive Brightness Helper
+          description: |-
+            `optional` `entity`
+
+            Input number helper containing adaptive brightness (0-100). Only used when Light Adjustment Mode is "Adaptive".
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain:
+                    - input_number
+              multiple: false
+        hue_light_adaptive_color_temp:
+          name: Adaptive Color Temperature Helper
+          description: |-
+            `optional` `entity`
+
+            Input number helper containing adaptive color temperature in Kelvin. Only used when Light Adjustment Mode is "Adaptive".
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain:
+                    - input_number
+              multiple: false
+        hue_light_schedule:
+          name: Schedule Helper
+          description: |-
+            `optional` `entity`
+
+            Schedule helper for time-based brightness and color adjustments. Only used when Light Adjustment Mode is "Schedule". **Schedules can be reused between lights.**
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain:
+                    - schedule
+              multiple: false
+        hue_light_auto_adjust_brightness:
+          name: Auto-Adjust Brightness on Value Change
+          description: |-
+            `optional` `boolean`
+
+            Automatically update light brightness when adaptive or schedule values change. Only affects currently on lights.
+          default: false
+          selector:
+            boolean: {}
+        hue_light_auto_adjust_color_temp:
+          name: Auto-Adjust Color Temperature on Value Change
+          description: |-
+            `optional` `boolean`
+
+            Automatically update light color temperature when adaptive or schedule values change. Only affects currently on lights.
+          default: false
+          selector:
+            boolean: {}
+        hue_light_auto_adjust_transition:
+          name: Auto-Adjust Transition
+          description: |-
+            `optional` `number`
+
+            Transition duration in seconds when auto-adjusting lights.
+          default: 300
+          selector:
+            number:
+              min: 0
+              max: 600
+              step: 30
+              unit_of_measurement: s
+              mode: slider
+        hue_short_release_reset_brightness:
+          name: Reset Brightness on Short Release
+          description: |-
+            `optional` `boolean`
+
+            Apply the default brightness value when turning on. Disable to maintain current brightness.
+          default: true
+          selector:
+            boolean: {}
+        hue_short_release_reset_color:
+          name: Reset Color Temperature on Short Release
+          description: |-
+            `optional` `boolean`
+
+            Apply the default color temperature when turning on. Disable to maintain current color temperature.
+          default: true
+          selector:
+            boolean: {}
+        hue_long_release_reset_brightness:
+          name: Reset Brightness on Long Release
+          description: |-
+            `optional` `boolean`
+
+            Apply the default brightness value on long release. Disable to maintain current brightness.
+          default: true
+          selector:
+            boolean: {}
+        hue_long_release_reset_color:
+          name: Reset Color Temperature on Long Release
+          description: |-
+            `optional` `boolean`
+
+            Apply the default color temperature on long release. Disable to maintain current color temperature.
+          default: true
+          selector:
+            boolean: {}
+mode: single
+max_exceeded: silent
+trigger_variables:
+  z2m_base_topic: !input z2m_base_topic
+  z2m_device_name: !input z2m_device_name
+variables:
+  integration_type: !input integration_type
+  zha_remote: !input zha_remote
+  z2m_base_topic: !input z2m_base_topic
+  z2m_device_name: !input z2m_device_name
+  last_pressed: !input last_pressed
+  zha_command: "{{ trigger.event.data.command if trigger.event is defined else '' }}"
+  z2m_action: "{{ trigger.payload_json.action | default('') if trigger.payload_json is defined else '' }}"
+  command: |-
+    {% if zha_command != '' %}
+      {% if zha_command.startswith('on_') %}power_{{ zha_command[3:] }}
+      {% elif zha_command.startswith('off_') %}hue_{{ zha_command[4:] }}
+      {% else %}{{ zha_command }}
+      {% endif %}
+    {% elif z2m_action != '' %}
+      {% if z2m_action == 'on_press' %}power_press
+      {% elif z2m_action == 'on_press_release' %}power_short_release
+      {% elif z2m_action == 'on_hold' %}power_hold
+      {% elif z2m_action == 'on_hold_release' %}power_long_release
+      {% elif z2m_action == 'up_press' %}up_press
+      {% elif z2m_action == 'up_press_release' %}up_short_release
+      {% elif z2m_action == 'up_hold' %}up_hold
+      {% elif z2m_action == 'up_hold_release' %}up_long_release
+      {% elif z2m_action == 'down_press' %}down_press
+      {% elif z2m_action == 'down_press_release' %}down_short_release
+      {% elif z2m_action == 'down_hold' %}down_hold
+      {% elif z2m_action == 'down_hold_release' %}down_long_release
+      {% elif z2m_action == 'off_press' %}hue_press
+      {% elif z2m_action == 'off_press_release' %}hue_short_release
+      {% elif z2m_action == 'off_hold' %}hue_hold
+      {% elif z2m_action == 'off_hold_release' %}hue_long_release
+      {% elif z2m_action in ['recall_0', 'recall_1'] %}hue_short_release
+      {% else %}{{ z2m_action }}
+      {% endif %}
+    {% else %}
+    {% endif %}
+  event_button: |-
+    {% if command.startswith('power_') %}power
+    {% elif command.startswith('up_') %}up
+    {% elif command.startswith('down_') %}down
+    {% elif command.startswith('hue_') %}hue
+    {% else %}{% endif %}
+  z2m_button: "{{ {'power': 'on', 'up': 'up', 'down': 'down', 'hue': 'off'}.get(event_button, '') }}"
+  power_light: !input power_light
+  power_adjustment_mode: !input power_light_adjustment_mode
+  power_adaptive_brightness: !input power_light_adaptive_brightness
+  power_adaptive_color_temp: !input power_light_adaptive_color_temp
+  power_schedule: !input power_light_schedule
+  power_brightness_input: !input power_light_brightness
+  power_color_input: !input power_light_color
+  power_transition_input: !input power_light_transition
+  power_brightness_pct: |-
+    {% if power_adjustment_mode == 'adaptive' %}
+      {% if power_adaptive_brightness not in [none, '', []] %}
+        {{ states(power_adaptive_brightness) | int(power_brightness_input) }}
+      {% else %}
+        {{ power_brightness_input }}
+      {% endif %}
+    {% elif power_adjustment_mode == 'schedule' %}
+      {% if power_schedule not in [none, '', []] %}
+        {% set val = state_attr(power_schedule, 'brightness_pct') %}
+        {{ val if val is not none else power_brightness_input }}
+      {% else %}
+        {{ power_brightness_input }}
+      {% endif %}
+    {% else %}
+      {{ power_brightness_input }}
+    {% endif %}
+  power_color_temp_kelvin: |-
+    {% if power_adjustment_mode == 'adaptive' %}
+      {% if power_adaptive_color_temp not in [none, '', []] %}
+        {{ states(power_adaptive_color_temp) | int(power_color_input) }}
+      {% else %}
+        {{ power_color_input }}
+      {% endif %}
+    {% elif power_adjustment_mode == 'schedule' %}
+      {% if power_schedule not in [none, '', []] %}
+        {% set val = state_attr(power_schedule, 'color_temp_kelvin') %}
+        {{ val if val is not none else power_color_input }}
+      {% else %}
+        {{ power_color_input }}
+      {% endif %}
+    {% else %}
+      {{ power_color_input }}
+    {% endif %}
+  power_transition: |-
+    {% if power_adjustment_mode == 'schedule' %}
+      {% if power_schedule not in [none, '', []] %}
+        {{ state_attr(power_schedule, 'transition') | default(power_transition_input, true) | float }}
+      {% else %}
+        {{ power_transition_input | float }}
+      {% endif %}
+    {% else %}
+      {{ power_transition_input | float }}
+    {% endif %}
+  power_short_release_light_mode: !input power_short_release_light_mode
+  power_long_release_light_mode: !input power_long_release_light_mode
+  power_double_light_mode: !input power_double_light_mode
+  power_has_light: "{{ power_light.entity_id | default([]) | length > 0 or power_light.device_id | default([]) | length > 0 or power_light.area_id | default([]) | length > 0 or power_light.label_id | default([]) | length > 0 }}"
+  power_short_release_reset_brightness: !input power_short_release_reset_brightness
+  power_short_release_reset_color: !input power_short_release_reset_color
+  power_long_release_reset_brightness: !input power_long_release_reset_brightness
+  power_long_release_reset_color: !input power_long_release_reset_color
+  power_light_auto_adjust_brightness: !input power_light_auto_adjust_brightness
+  power_light_auto_adjust_color_temp: !input power_light_auto_adjust_color_temp
+  power_light_auto_adjust_transition: !input power_light_auto_adjust_transition
+  power_light_entities: |-
+    {% set ns = namespace(entities=[]) %}
+    {% if power_light.entity_id is defined and power_light.entity_id | length > 0 %}
+      {% if power_light.entity_id is string %}
+        {% set ns.entities = [power_light.entity_id] %}
+      {% else %}
+        {% set ns.entities = power_light.entity_id %}
+      {% endif %}
+    {% elif power_light.device_id is defined and power_light.device_id | length > 0 %}
+      {% set devices = [power_light.device_id] if power_light.device_id is string else power_light.device_id %}
+      {% for device in devices %}
+        {% set ns.entities = ns.entities + device_entities(device) | select('match', '^light\.') | list %}
+      {% endfor %}
+    {% elif power_light.area_id is defined and power_light.area_id | length > 0 %}
+      {% set areas = [power_light.area_id] if power_light.area_id is string else power_light.area_id %}
+      {% for area in areas %}
+        {% set ns.entities = ns.entities + area_entities(area) | select('match', '^light\.') | list %}
+      {% endfor %}
+    {% elif power_light.label_id is defined and power_light.label_id | length > 0 %}
+      {% set labels = [power_light.label_id] if power_light.label_id is string else power_light.label_id %}
+      {% for label in labels %}
+        {% set ns.entities = ns.entities + label_entities(label) | select('match', '^light\.') | list %}
+      {% endfor %}
+    {% endif %}
+    {{ ns.entities }}
+  up_light: !input up_light
+  up_adjustment_mode: !input up_light_adjustment_mode
+  up_adaptive_brightness: !input up_light_adaptive_brightness
+  up_adaptive_color_temp: !input up_light_adaptive_color_temp
+  up_schedule: !input up_light_schedule
+  up_brightness_input: !input up_light_brightness
+  up_color_input: !input up_light_color
+  up_transition_input: !input up_light_transition
+  up_brightness_pct: |-
+    {% if up_adjustment_mode == 'adaptive' %}
+      {% if up_adaptive_brightness not in [none, '', []] %}
+        {{ states(up_adaptive_brightness) | int(up_brightness_input) }}
+      {% else %}
+        {{ up_brightness_input }}
+      {% endif %}
+    {% elif up_adjustment_mode == 'schedule' %}
+      {% if up_schedule not in [none, '', []] %}
+        {% set val = state_attr(up_schedule, 'brightness_pct') %}
+        {{ val if val is not none else up_brightness_input }}
+      {% else %}
+        {{ up_brightness_input }}
+      {% endif %}
+    {% else %}
+      {{ up_brightness_input }}
+    {% endif %}
+  up_color_temp_kelvin: |-
+    {% if up_adjustment_mode == 'adaptive' %}
+      {% if up_adaptive_color_temp not in [none, '', []] %}
+        {{ states(up_adaptive_color_temp) | int(up_color_input) }}
+      {% else %}
+        {{ up_color_input }}
+      {% endif %}
+    {% elif up_adjustment_mode == 'schedule' %}
+      {% if up_schedule not in [none, '', []] %}
+        {% set val = state_attr(up_schedule, 'color_temp_kelvin') %}
+        {{ val if val is not none else up_color_input }}
+      {% else %}
+        {{ up_color_input }}
+      {% endif %}
+    {% else %}
+      {{ up_color_input }}
+    {% endif %}
+  up_transition: |-
+    {% if up_adjustment_mode == 'schedule' %}
+      {% if up_schedule not in [none, '', []] %}
+        {{ state_attr(up_schedule, 'transition') | default(up_transition_input, true) | float }}
+      {% else %}
+        {{ up_transition_input | float }}
+      {% endif %}
+    {% else %}
+      {{ up_transition_input | float }}
+    {% endif %}
+  up_short_release_light_mode: !input up_short_release_light_mode
+  up_long_release_light_mode: !input up_long_release_light_mode
+  up_double_light_mode: !input up_double_light_mode
+  up_has_light: "{{ up_light.entity_id | default([]) | length > 0 or up_light.device_id | default([]) | length > 0 or up_light.area_id | default([]) | length > 0 or up_light.label_id | default([]) | length > 0 }}"
+  up_short_release_reset_brightness: !input up_short_release_reset_brightness
+  up_short_release_reset_color: !input up_short_release_reset_color
+  up_long_release_reset_brightness: !input up_long_release_reset_brightness
+  up_long_release_reset_color: !input up_long_release_reset_color
+  up_light_auto_adjust_brightness: !input up_light_auto_adjust_brightness
+  up_light_auto_adjust_color_temp: !input up_light_auto_adjust_color_temp
+  up_light_auto_adjust_transition: !input up_light_auto_adjust_transition
+  up_light_entities: |-
+    {% set ns = namespace(entities=[]) %}
+    {% if up_light.entity_id is defined and up_light.entity_id | length > 0 %}
+      {% if up_light.entity_id is string %}
+        {% set ns.entities = [up_light.entity_id] %}
+      {% else %}
+        {% set ns.entities = up_light.entity_id %}
+      {% endif %}
+    {% elif up_light.device_id is defined and up_light.device_id | length > 0 %}
+      {% set devices = [up_light.device_id] if up_light.device_id is string else up_light.device_id %}
+      {% for device in devices %}
+        {% set ns.entities = ns.entities + device_entities(device) | select('match', '^light\.') | list %}
+      {% endfor %}
+    {% elif up_light.area_id is defined and up_light.area_id | length > 0 %}
+      {% set areas = [up_light.area_id] if up_light.area_id is string else up_light.area_id %}
+      {% for area in areas %}
+        {% set ns.entities = ns.entities + area_entities(area) | select('match', '^light\.') | list %}
+      {% endfor %}
+    {% elif up_light.label_id is defined and up_light.label_id | length > 0 %}
+      {% set labels = [up_light.label_id] if up_light.label_id is string else up_light.label_id %}
+      {% for label in labels %}
+        {% set ns.entities = ns.entities + label_entities(label) | select('match', '^light\.') | list %}
+      {% endfor %}
+    {% endif %}
+    {{ ns.entities }}
+  down_light: !input down_light
+  down_adjustment_mode: !input down_light_adjustment_mode
+  down_adaptive_brightness: !input down_light_adaptive_brightness
+  down_adaptive_color_temp: !input down_light_adaptive_color_temp
+  down_schedule: !input down_light_schedule
+  down_brightness_input: !input down_light_brightness
+  down_color_input: !input down_light_color
+  down_transition_input: !input down_light_transition
+  down_brightness_pct: |-
+    {% if down_adjustment_mode == 'adaptive' %}
+      {% if down_adaptive_brightness not in [none, '', []] %}
+        {{ states(down_adaptive_brightness) | int(down_brightness_input) }}
+      {% else %}
+        {{ down_brightness_input }}
+      {% endif %}
+    {% elif down_adjustment_mode == 'schedule' %}
+      {% if down_schedule not in [none, '', []] %}
+        {% set val = state_attr(down_schedule, 'brightness_pct') %}
+        {{ val if val is not none else down_brightness_input }}
+      {% else %}
+        {{ down_brightness_input }}
+      {% endif %}
+    {% else %}
+      {{ down_brightness_input }}
+    {% endif %}
+  down_color_temp_kelvin: |-
+    {% if down_adjustment_mode == 'adaptive' %}
+      {% if down_adaptive_color_temp not in [none, '', []] %}
+        {{ states(down_adaptive_color_temp) | int(down_color_input) }}
+      {% else %}
+        {{ down_color_input }}
+      {% endif %}
+    {% elif down_adjustment_mode == 'schedule' %}
+      {% if down_schedule not in [none, '', []] %}
+        {% set val = state_attr(down_schedule, 'color_temp_kelvin') %}
+        {{ val if val is not none else down_color_input }}
+      {% else %}
+        {{ down_color_input }}
+      {% endif %}
+    {% else %}
+      {{ down_color_input }}
+    {% endif %}
+  down_transition: |-
+    {% if down_adjustment_mode == 'schedule' %}
+      {% if down_schedule not in [none, '', []] %}
+        {{ state_attr(down_schedule, 'transition') | default(down_transition_input, true) | float }}
+      {% else %}
+        {{ down_transition_input | float }}
+      {% endif %}
+    {% else %}
+      {{ down_transition_input | float }}
+    {% endif %}
+  down_short_release_light_mode: !input down_short_release_light_mode
+  down_long_release_light_mode: !input down_long_release_light_mode
+  down_double_light_mode: !input down_double_light_mode
+  down_has_light: "{{ down_light.entity_id | default([]) | length > 0 or down_light.device_id | default([]) | length > 0 or down_light.area_id | default([]) | length > 0 or down_light.label_id | default([]) | length > 0 }}"
+  down_short_release_reset_brightness: !input down_short_release_reset_brightness
+  down_short_release_reset_color: !input down_short_release_reset_color
+  down_long_release_reset_brightness: !input down_long_release_reset_brightness
+  down_long_release_reset_color: !input down_long_release_reset_color
+  down_light_auto_adjust_brightness: !input down_light_auto_adjust_brightness
+  down_light_auto_adjust_color_temp: !input down_light_auto_adjust_color_temp
+  down_light_auto_adjust_transition: !input down_light_auto_adjust_transition
+  down_light_entities: |-
+    {% set ns = namespace(entities=[]) %}
+    {% if down_light.entity_id is defined and down_light.entity_id | length > 0 %}
+      {% if down_light.entity_id is string %}
+        {% set ns.entities = [down_light.entity_id] %}
+      {% else %}
+        {% set ns.entities = down_light.entity_id %}
+      {% endif %}
+    {% elif down_light.device_id is defined and down_light.device_id | length > 0 %}
+      {% set devices = [down_light.device_id] if down_light.device_id is string else down_light.device_id %}
+      {% for device in devices %}
+        {% set ns.entities = ns.entities + device_entities(device) | select('match', '^light\.') | list %}
+      {% endfor %}
+    {% elif down_light.area_id is defined and down_light.area_id | length > 0 %}
+      {% set areas = [down_light.area_id] if down_light.area_id is string else down_light.area_id %}
+      {% for area in areas %}
+        {% set ns.entities = ns.entities + area_entities(area) | select('match', '^light\.') | list %}
+      {% endfor %}
+    {% elif down_light.label_id is defined and down_light.label_id | length > 0 %}
+      {% set labels = [down_light.label_id] if down_light.label_id is string else down_light.label_id %}
+      {% for label in labels %}
+        {% set ns.entities = ns.entities + label_entities(label) | select('match', '^light\.') | list %}
+      {% endfor %}
+    {% endif %}
+    {{ ns.entities }}
+  hue_light: !input hue_light
+  hue_adjustment_mode: !input hue_light_adjustment_mode
+  hue_adaptive_brightness: !input hue_light_adaptive_brightness
+  hue_adaptive_color_temp: !input hue_light_adaptive_color_temp
+  hue_schedule: !input hue_light_schedule
+  hue_brightness_input: !input hue_light_brightness
+  hue_color_input: !input hue_light_color
+  hue_transition_input: !input hue_light_transition
+  hue_brightness_pct: |-
+    {% if hue_adjustment_mode == 'adaptive' %}
+      {% if hue_adaptive_brightness not in [none, '', []] %}
+        {{ states(hue_adaptive_brightness) | int(hue_brightness_input) }}
+      {% else %}
+        {{ hue_brightness_input }}
+      {% endif %}
+    {% elif hue_adjustment_mode == 'schedule' %}
+      {% if hue_schedule not in [none, '', []] %}
+        {% set val = state_attr(hue_schedule, 'brightness_pct') %}
+        {{ val if val is not none else hue_brightness_input }}
+      {% else %}
+        {{ hue_brightness_input }}
+      {% endif %}
+    {% else %}
+      {{ hue_brightness_input }}
+    {% endif %}
+  hue_color_temp_kelvin: |-
+    {% if hue_adjustment_mode == 'adaptive' %}
+      {% if hue_adaptive_color_temp not in [none, '', []] %}
+        {{ states(hue_adaptive_color_temp) | int(hue_color_input) }}
+      {% else %}
+        {{ hue_color_input }}
+      {% endif %}
+    {% elif hue_adjustment_mode == 'schedule' %}
+      {% if hue_schedule not in [none, '', []] %}
+        {% set val = state_attr(hue_schedule, 'color_temp_kelvin') %}
+        {{ val if val is not none else hue_color_input }}
+      {% else %}
+        {{ hue_color_input }}
+      {% endif %}
+    {% else %}
+      {{ hue_color_input }}
+    {% endif %}
+  hue_transition: |-
+    {% if hue_adjustment_mode == 'schedule' %}
+      {% if hue_schedule not in [none, '', []] %}
+        {{ state_attr(hue_schedule, 'transition') | default(hue_transition_input, true) | float }}
+      {% else %}
+        {{ hue_transition_input | float }}
+      {% endif %}
+    {% else %}
+      {{ hue_transition_input | float }}
+    {% endif %}
+  hue_short_release_light_mode: !input hue_short_release_light_mode
+  hue_long_release_light_mode: !input hue_long_release_light_mode
+  hue_double_light_mode: !input hue_double_light_mode
+  hue_has_light: "{{ hue_light.entity_id | default([]) | length > 0 or hue_light.device_id | default([]) | length > 0 or hue_light.area_id | default([]) | length > 0 or hue_light.label_id | default([]) | length > 0 }}"
+  hue_short_release_reset_brightness: !input hue_short_release_reset_brightness
+  hue_short_release_reset_color: !input hue_short_release_reset_color
+  hue_long_release_reset_brightness: !input hue_long_release_reset_brightness
+  hue_long_release_reset_color: !input hue_long_release_reset_color
+  hue_light_auto_adjust_brightness: !input hue_light_auto_adjust_brightness
+  hue_light_auto_adjust_color_temp: !input hue_light_auto_adjust_color_temp
+  hue_light_auto_adjust_transition: !input hue_light_auto_adjust_transition
+  hue_light_entities: |-
+    {% set ns = namespace(entities=[]) %}
+    {% if hue_light.entity_id is defined and hue_light.entity_id | length > 0 %}
+      {% if hue_light.entity_id is string %}
+        {% set ns.entities = [hue_light.entity_id] %}
+      {% else %}
+        {% set ns.entities = hue_light.entity_id %}
+      {% endif %}
+    {% elif hue_light.device_id is defined and hue_light.device_id | length > 0 %}
+      {% set devices = [hue_light.device_id] if hue_light.device_id is string else hue_light.device_id %}
+      {% for device in devices %}
+        {% set ns.entities = ns.entities + device_entities(device) | select('match', '^light\.') | list %}
+      {% endfor %}
+    {% elif hue_light.area_id is defined and hue_light.area_id | length > 0 %}
+      {% set areas = [hue_light.area_id] if hue_light.area_id is string else hue_light.area_id %}
+      {% for area in areas %}
+        {% set ns.entities = ns.entities + area_entities(area) | select('match', '^light\.') | list %}
+      {% endfor %}
+    {% elif hue_light.label_id is defined and hue_light.label_id | length > 0 %}
+      {% set labels = [hue_light.label_id] if hue_light.label_id is string else hue_light.label_id %}
+      {% for label in labels %}
+        {% set ns.entities = ns.entities + label_entities(label) | select('match', '^light\.') | list %}
+      {% endfor %}
+    {% endif %}
+    {{ ns.entities }}
+  up_button_mode: !input up_button_mode
+  down_button_mode: !input down_button_mode
+  brightness_speed: !input brightness_speed
+  brightness_fallback_light: !input brightness_fallback_light
+  brightness_step_pct: "{{ (brightness_speed | int(5)) * 2 }}"
+  brightness_hold_interval: 0.5
+  brightness_hold_max_steps: 60
+  dim_button: |-
+    {% set b = states(last_pressed) %}
+    {{ b if b in ['power', 'up', 'down', 'hue'] else '' }}
+  dim_target: |-
+    {% if dim_button == 'power' %}{{ power_light }}
+    {% elif dim_button == 'up' %}{{ up_light }}
+    {% elif dim_button == 'down' %}{{ down_light }}
+    {% elif dim_button == 'hue' %}{{ hue_light }}
+    {% elif brightness_fallback_light not in [none, '', [], {}] %}{{ brightness_fallback_light }}
+    {% else %}{{ power_light }}
+    {% endif %}
+  dim_has_light: |-
+    {{ dim_target.entity_id | default([]) | length > 0 or
+       dim_target.device_id | default([]) | length > 0 or
+       dim_target.area_id | default([]) | length > 0 or
+       dim_target.label_id | default([]) | length > 0 }}
+triggers:
+  - trigger: event
+    event_type: zha_event
+    event_data:
+      device_id: !input zha_remote
+    id: zha_event
+  - trigger: mqtt
+    topic: "{{ z2m_base_topic ~ '/' ~ z2m_device_name }}"
+    id: z2m_action
+  - trigger: state
+    entity_id: !input power_light_schedule
+    id: schedule_power_change
+  - trigger: state
+    entity_id: !input up_light_schedule
+    id: schedule_up_change
+  - trigger: state
+    entity_id: !input down_light_schedule
+    id: schedule_down_change
+  - trigger: state
+    entity_id: !input hue_light_schedule
+    id: schedule_hue_change
+  - trigger: state
+    entity_id: !input power_light_adaptive_brightness
+    id: adaptive_power_brightness_change
+  - trigger: state
+    entity_id: !input power_light_adaptive_color_temp
+    id: adaptive_power_color_change
+  - trigger: state
+    entity_id: !input up_light_adaptive_brightness
+    id: adaptive_up_brightness_change
+  - trigger: state
+    entity_id: !input up_light_adaptive_color_temp
+    id: adaptive_up_color_change
+  - trigger: state
+    entity_id: !input down_light_adaptive_brightness
+    id: adaptive_down_brightness_change
+  - trigger: state
+    entity_id: !input down_light_adaptive_color_temp
+    id: adaptive_down_color_change
+  - trigger: state
+    entity_id: !input hue_light_adaptive_brightness
+    id: adaptive_hue_brightness_change
+  - trigger: state
+    entity_id: !input hue_light_adaptive_color_temp
+    id: adaptive_hue_color_change
+actions:
+  - alias: Validate integration type matches trigger
+    condition: template
+    value_template: |-
+      {% if trigger.id == 'zha_event' %}
+        {{ 'zha' in integration_type }}
+      {% elif trigger.id == 'z2m_action' %}
+        {{ 'z2m' in integration_type }}
+      {% else %}
+        true
+      {% endif %}
+  - alias: Skip Z2M press-only events
+    condition: template
+    value_template: |-
+      {% if trigger.id == 'z2m_action' %}
+        {{ z2m_action not in ['on_press', 'up_press', 'down_press', 'off_press'] }}
+      {% else %}
+        true
+      {% endif %}
+  - alias: Z2M double press detection
+    if:
+      - "{{ trigger.id == 'z2m_action' }}"
+      - "{{ command in ['power_short_release', 'up_short_release', 'down_short_release', 'hue_short_release'] }}"
+      - "{{ not (event_button == 'up' and up_button_mode == 'brightness') and not (event_button == 'down' and down_button_mode == 'brightness') }}"
+    then:
+      - variables:
+          detected_button: "{{ event_button }}"
+          detected_z2m: "{{ z2m_button }}"
+      - alias: Wait for second press
+        wait_for_trigger:
+          - trigger: mqtt
+            topic: "{{ z2m_base_topic ~ '/' ~ z2m_device_name }}"
+            value_template: "{{ value_json.action | default('') }}"
+            payload: "{{ detected_z2m }}_press"
+        timeout:
+          milliseconds: 300
+        continue_on_timeout: true
+      - variables:
+          command: |-
+            {% if wait.trigger is not none %}{{ detected_button }}_double_press
+            {% else %}{{ detected_button }}_short_release
+            {% endif %}
+      - alias: Consume Z2M second release after double press
+        if: "{{ wait.trigger is not none }}"
+        then:
+          - wait_for_trigger:
+              - trigger: mqtt
+                topic: "{{ z2m_base_topic ~ '/' ~ z2m_device_name }}"
+                value_template: "{{ value_json.action | default('') }}"
+                payload: "{{ detected_z2m }}_press_release"
+            timeout:
+              milliseconds: 500
+            continue_on_timeout: true
+  - alias: Update last pressed helper for button commands
+    if:
+      - "{{ event_button != '' }}"
+      - "{{ not (event_button == 'up' and up_button_mode == 'brightness') and not (event_button == 'down' and down_button_mode == 'brightness') }}"
+    then:
+      - action: input_text.set_value
+        target:
+          entity_id: "{{ last_pressed }}"
+        data:
+          value: "{{ event_button }}"
+  - choose:
+      - conditions:
+          - "{{ trigger.id in ['adaptive_power_brightness_change', 'adaptive_power_color_change', 'adaptive_up_brightness_change', 'adaptive_up_color_change', 'adaptive_down_brightness_change', 'adaptive_down_color_change', 'adaptive_hue_brightness_change', 'adaptive_hue_color_change', 'schedule_power_change', 'schedule_up_change', 'schedule_down_change', 'schedule_hue_change'] }}"
+        sequence:
+          - if:
+              - "{{ power_has_light }}"
+              - "{{ power_light_auto_adjust_brightness or power_light_auto_adjust_color_temp }}"
+              - "{{ power_adjustment_mode == 'adaptive' or (power_adjustment_mode == 'schedule' and power_schedule not in [none, '', []]) }}"
+            then:
+              - repeat:
+                  for_each: "{{ power_light_entities }}"
+                  sequence:
+                    - if:
+                        - "{{ is_state(repeat.item, 'on') }}"
+                      then:
+                        - choose:
+                            - conditions: "{{ power_light_auto_adjust_brightness and power_light_auto_adjust_color_temp }}"
+                              sequence:
+                                - action: light.turn_on
+                                  target:
+                                    entity_id: "{{ repeat.item }}"
+                                  data:
+                                    brightness_pct: "{{ power_brightness_pct }}"
+                                    color_temp_kelvin: "{{ power_color_temp_kelvin }}"
+                                    transition: "{{ power_light_auto_adjust_transition }}"
+                            - conditions: "{{ power_light_auto_adjust_brightness }}"
+                              sequence:
+                                - action: light.turn_on
+                                  target:
+                                    entity_id: "{{ repeat.item }}"
+                                  data:
+                                    brightness_pct: "{{ power_brightness_pct }}"
+                                    transition: "{{ power_light_auto_adjust_transition }}"
+                            - conditions: "{{ power_light_auto_adjust_color_temp }}"
+                              sequence:
+                                - action: light.turn_on
+                                  target:
+                                    entity_id: "{{ repeat.item }}"
+                                  data:
+                                    color_temp_kelvin: "{{ power_color_temp_kelvin }}"
+                                    transition: "{{ power_light_auto_adjust_transition }}"
+          - if:
+              - "{{ up_has_light }}"
+              - "{{ up_light_auto_adjust_brightness or up_light_auto_adjust_color_temp }}"
+              - "{{ up_adjustment_mode == 'adaptive' or (up_adjustment_mode == 'schedule' and up_schedule not in [none, '', []]) }}"
+            then:
+              - repeat:
+                  for_each: "{{ up_light_entities }}"
+                  sequence:
+                    - if:
+                        - "{{ is_state(repeat.item, 'on') }}"
+                      then:
+                        - choose:
+                            - conditions: "{{ up_light_auto_adjust_brightness and up_light_auto_adjust_color_temp }}"
+                              sequence:
+                                - action: light.turn_on
+                                  target:
+                                    entity_id: "{{ repeat.item }}"
+                                  data:
+                                    brightness_pct: "{{ up_brightness_pct }}"
+                                    color_temp_kelvin: "{{ up_color_temp_kelvin }}"
+                                    transition: "{{ up_light_auto_adjust_transition }}"
+                            - conditions: "{{ up_light_auto_adjust_brightness }}"
+                              sequence:
+                                - action: light.turn_on
+                                  target:
+                                    entity_id: "{{ repeat.item }}"
+                                  data:
+                                    brightness_pct: "{{ up_brightness_pct }}"
+                                    transition: "{{ up_light_auto_adjust_transition }}"
+                            - conditions: "{{ up_light_auto_adjust_color_temp }}"
+                              sequence:
+                                - action: light.turn_on
+                                  target:
+                                    entity_id: "{{ repeat.item }}"
+                                  data:
+                                    color_temp_kelvin: "{{ up_color_temp_kelvin }}"
+                                    transition: "{{ up_light_auto_adjust_transition }}"
+          - if:
+              - "{{ down_has_light }}"
+              - "{{ down_light_auto_adjust_brightness or down_light_auto_adjust_color_temp }}"
+              - "{{ down_adjustment_mode == 'adaptive' or (down_adjustment_mode == 'schedule' and down_schedule not in [none, '', []]) }}"
+            then:
+              - repeat:
+                  for_each: "{{ down_light_entities }}"
+                  sequence:
+                    - if:
+                        - "{{ is_state(repeat.item, 'on') }}"
+                      then:
+                        - choose:
+                            - conditions: "{{ down_light_auto_adjust_brightness and down_light_auto_adjust_color_temp }}"
+                              sequence:
+                                - action: light.turn_on
+                                  target:
+                                    entity_id: "{{ repeat.item }}"
+                                  data:
+                                    brightness_pct: "{{ down_brightness_pct }}"
+                                    color_temp_kelvin: "{{ down_color_temp_kelvin }}"
+                                    transition: "{{ down_light_auto_adjust_transition }}"
+                            - conditions: "{{ down_light_auto_adjust_brightness }}"
+                              sequence:
+                                - action: light.turn_on
+                                  target:
+                                    entity_id: "{{ repeat.item }}"
+                                  data:
+                                    brightness_pct: "{{ down_brightness_pct }}"
+                                    transition: "{{ down_light_auto_adjust_transition }}"
+                            - conditions: "{{ down_light_auto_adjust_color_temp }}"
+                              sequence:
+                                - action: light.turn_on
+                                  target:
+                                    entity_id: "{{ repeat.item }}"
+                                  data:
+                                    color_temp_kelvin: "{{ down_color_temp_kelvin }}"
+                                    transition: "{{ down_light_auto_adjust_transition }}"
+          - if:
+              - "{{ hue_has_light }}"
+              - "{{ hue_light_auto_adjust_brightness or hue_light_auto_adjust_color_temp }}"
+              - "{{ hue_adjustment_mode == 'adaptive' or (hue_adjustment_mode == 'schedule' and hue_schedule not in [none, '', []]) }}"
+            then:
+              - repeat:
+                  for_each: "{{ hue_light_entities }}"
+                  sequence:
+                    - if:
+                        - "{{ is_state(repeat.item, 'on') }}"
+                      then:
+                        - choose:
+                            - conditions: "{{ hue_light_auto_adjust_brightness and hue_light_auto_adjust_color_temp }}"
+                              sequence:
+                                - action: light.turn_on
+                                  target:
+                                    entity_id: "{{ repeat.item }}"
+                                  data:
+                                    brightness_pct: "{{ hue_brightness_pct }}"
+                                    color_temp_kelvin: "{{ hue_color_temp_kelvin }}"
+                                    transition: "{{ hue_light_auto_adjust_transition }}"
+                            - conditions: "{{ hue_light_auto_adjust_brightness }}"
+                              sequence:
+                                - action: light.turn_on
+                                  target:
+                                    entity_id: "{{ repeat.item }}"
+                                  data:
+                                    brightness_pct: "{{ hue_brightness_pct }}"
+                                    transition: "{{ hue_light_auto_adjust_transition }}"
+                            - conditions: "{{ hue_light_auto_adjust_color_temp }}"
+                              sequence:
+                                - action: light.turn_on
+                                  target:
+                                    entity_id: "{{ repeat.item }}"
+                                  data:
+                                    color_temp_kelvin: "{{ hue_color_temp_kelvin }}"
+                                    transition: "{{ hue_light_auto_adjust_transition }}"
+          - stop: Auto-adjust completed
+      - conditions: "{{ command == 'power_press' }}"
+        sequence: !input power_press
+      - conditions: "{{ command == 'power_short_release' }}"
+        sequence:
+          - sequence: !input power_short_release
+          - if: "{{ power_has_light }}"
+            then:
+              - parallel:
+                  - if: "{{ 'turn_on' in power_short_release_light_mode }}"
+                    then:
+                      - choose:
+                          - conditions: "{{ power_short_release_reset_brightness and power_short_release_reset_color }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ power_light }}"
+                                data:
+                                  brightness_pct: "{{ power_brightness_pct }}"
+                                  color_temp_kelvin: "{{ power_color_temp_kelvin }}"
+                                  transition: "{{ power_transition }}"
+                          - conditions: "{{ power_short_release_reset_brightness }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ power_light }}"
+                                data:
+                                  brightness_pct: "{{ power_brightness_pct }}"
+                                  transition: "{{ power_transition }}"
+                          - conditions: "{{ power_short_release_reset_color }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ power_light }}"
+                                data:
+                                  color_temp_kelvin: "{{ power_color_temp_kelvin }}"
+                                  transition: "{{ power_transition }}"
+                        default:
+                          - action: light.turn_on
+                            target: "{{ power_light }}"
+                            data:
+                              transition: "{{ power_transition }}"
+                  - if: "{{ 'turn_off' in power_short_release_light_mode }}"
+                    then:
+                      - action: light.turn_off
+                        target: "{{ power_light }}"
+                        data:
+                          transition: "{{ power_transition }}"
+                  - if: "{{ 'toggle' in power_short_release_light_mode }}"
+                    then:
+                      - choose:
+                          - conditions: "{{ power_short_release_reset_brightness and power_short_release_reset_color }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ power_light }}"
+                                data:
+                                  brightness_pct: "{{ power_brightness_pct }}"
+                                  color_temp_kelvin: "{{ power_color_temp_kelvin }}"
+                                  transition: "{{ power_transition }}"
+                          - conditions: "{{ power_short_release_reset_brightness }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ power_light }}"
+                                data:
+                                  brightness_pct: "{{ power_brightness_pct }}"
+                                  transition: "{{ power_transition }}"
+                          - conditions: "{{ power_short_release_reset_color }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ power_light }}"
+                                data:
+                                  color_temp_kelvin: "{{ power_color_temp_kelvin }}"
+                                  transition: "{{ power_transition }}"
+                        default:
+                          - action: light.toggle
+                            target: "{{ power_light }}"
+                            data:
+                              transition: "{{ power_transition }}"
+      - conditions: "{{ command == 'power_hold' }}"
+        sequence: !input power_hold
+      - conditions: "{{ command == 'power_long_release' }}"
+        sequence:
+          - sequence: !input power_long_release
+          - if: "{{ power_has_light }}"
+            then:
+              - parallel:
+                  - if: "{{ 'turn_on' in power_long_release_light_mode }}"
+                    then:
+                      - choose:
+                          - conditions: "{{ power_long_release_reset_brightness and power_long_release_reset_color }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ power_light }}"
+                                data:
+                                  brightness_pct: "{{ power_brightness_pct }}"
+                                  color_temp_kelvin: "{{ power_color_temp_kelvin }}"
+                                  transition: "{{ power_transition }}"
+                          - conditions: "{{ power_long_release_reset_brightness }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ power_light }}"
+                                data:
+                                  brightness_pct: "{{ power_brightness_pct }}"
+                                  transition: "{{ power_transition }}"
+                          - conditions: "{{ power_long_release_reset_color }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ power_light }}"
+                                data:
+                                  color_temp_kelvin: "{{ power_color_temp_kelvin }}"
+                                  transition: "{{ power_transition }}"
+                        default:
+                          - action: light.turn_on
+                            target: "{{ power_light }}"
+                            data:
+                              transition: "{{ power_transition }}"
+                  - if: "{{ 'turn_off' in power_long_release_light_mode }}"
+                    then:
+                      - action: light.turn_off
+                        target: "{{ power_light }}"
+                        data:
+                          transition: "{{ power_transition }}"
+                  - if: "{{ 'toggle' in power_long_release_light_mode }}"
+                    then:
+                      - choose:
+                          - conditions: "{{ power_long_release_reset_brightness and power_long_release_reset_color }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ power_light }}"
+                                data:
+                                  brightness_pct: "{{ power_brightness_pct }}"
+                                  color_temp_kelvin: "{{ power_color_temp_kelvin }}"
+                                  transition: "{{ power_transition }}"
+                          - conditions: "{{ power_long_release_reset_brightness }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ power_light }}"
+                                data:
+                                  brightness_pct: "{{ power_brightness_pct }}"
+                                  transition: "{{ power_transition }}"
+                          - conditions: "{{ power_long_release_reset_color }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ power_light }}"
+                                data:
+                                  color_temp_kelvin: "{{ power_color_temp_kelvin }}"
+                                  transition: "{{ power_transition }}"
+                        default:
+                          - action: light.toggle
+                            target: "{{ power_light }}"
+                            data:
+                              transition: "{{ power_transition }}"
+      - conditions: "{{ command == 'power_double_press' }}"
+        sequence:
+          - sequence: !input power_double
+          - if: "{{ power_has_light }}"
+            then:
+              - parallel:
+                  - if: "{{ 'turn_on' in power_double_light_mode }}"
+                    then:
+                      - action: light.turn_on
+                        target: "{{ power_light }}"
+                        data:
+                          brightness_pct: "{{ power_brightness_pct }}"
+                          color_temp_kelvin: "{{ power_color_temp_kelvin }}"
+                          transition: "{{ power_transition }}"
+                  - if: "{{ 'turn_off' in power_double_light_mode }}"
+                    then:
+                      - action: light.turn_off
+                        target: "{{ power_light }}"
+                        data:
+                          transition: "{{ power_transition }}"
+                  - if: "{{ 'toggle' in power_double_light_mode }}"
+                    then:
+                      - action: light.toggle
+                        target: "{{ power_light }}"
+                        data:
+                          brightness_pct: "{{ power_brightness_pct }}"
+                          color_temp_kelvin: "{{ power_color_temp_kelvin }}"
+                          transition: "{{ power_transition }}"
+      - conditions: "{{ command == 'up_press' }}"
+        sequence: !input up_press
+      - conditions: "{{ command == 'up_short_release' }}"
+        sequence:
+          - sequence: !input up_short_release
+          - if: "{{ up_button_mode == 'brightness' and dim_has_light }}"
+            then:
+              - action: light.turn_on
+                target: "{{ dim_target }}"
+                data:
+                  brightness_step_pct: "{{ brightness_step_pct }}"
+                  transition: "{{ brightness_hold_interval }}"
+          - if: "{{ up_has_light and up_button_mode == 'normal' }}"
+            then:
+              - parallel:
+                  - if: "{{ 'turn_on' in up_short_release_light_mode }}"
+                    then:
+                      - choose:
+                          - conditions: "{{ up_short_release_reset_brightness and up_short_release_reset_color }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ up_light }}"
+                                data:
+                                  brightness_pct: "{{ up_brightness_pct }}"
+                                  color_temp_kelvin: "{{ up_color_temp_kelvin }}"
+                                  transition: "{{ up_transition }}"
+                          - conditions: "{{ up_short_release_reset_brightness }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ up_light }}"
+                                data:
+                                  brightness_pct: "{{ up_brightness_pct }}"
+                                  transition: "{{ up_transition }}"
+                          - conditions: "{{ up_short_release_reset_color }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ up_light }}"
+                                data:
+                                  color_temp_kelvin: "{{ up_color_temp_kelvin }}"
+                                  transition: "{{ up_transition }}"
+                        default:
+                          - action: light.turn_on
+                            target: "{{ up_light }}"
+                            data:
+                              transition: "{{ up_transition }}"
+                  - if: "{{ 'turn_off' in up_short_release_light_mode }}"
+                    then:
+                      - action: light.turn_off
+                        target: "{{ up_light }}"
+                        data:
+                          transition: "{{ up_transition }}"
+                  - if: "{{ 'toggle' in up_short_release_light_mode }}"
+                    then:
+                      - choose:
+                          - conditions: "{{ up_short_release_reset_brightness and up_short_release_reset_color }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ up_light }}"
+                                data:
+                                  brightness_pct: "{{ up_brightness_pct }}"
+                                  color_temp_kelvin: "{{ up_color_temp_kelvin }}"
+                                  transition: "{{ up_transition }}"
+                          - conditions: "{{ up_short_release_reset_brightness }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ up_light }}"
+                                data:
+                                  brightness_pct: "{{ up_brightness_pct }}"
+                                  transition: "{{ up_transition }}"
+                          - conditions: "{{ up_short_release_reset_color }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ up_light }}"
+                                data:
+                                  color_temp_kelvin: "{{ up_color_temp_kelvin }}"
+                                  transition: "{{ up_transition }}"
+                        default:
+                          - action: light.toggle
+                            target: "{{ up_light }}"
+                            data:
+                              transition: "{{ up_transition }}"
+      - conditions: "{{ command == 'up_hold' }}"
+        sequence:
+          - sequence: !input up_hold
+          - if: "{{ up_button_mode == 'brightness' and dim_has_light }}"
+            then:
+              - alias: Step brightness until the button is released
+                repeat:
+                  sequence:
+                    - action: light.turn_on
+                      target: "{{ dim_target }}"
+                      data:
+                        brightness_step_pct: "{{ brightness_step_pct }}"
+                        transition: "{{ brightness_hold_interval }}"
+                    - wait_for_trigger:
+                        - trigger: event
+                          event_type: zha_event
+                          event_data:
+                            device_id: !input zha_remote
+                            command: up_long_release
+                        - trigger: mqtt
+                          topic: "{{ z2m_base_topic ~ '/' ~ z2m_device_name }}"
+                          value_template: "{{ value_json.action | default('') }}"
+                          payload: up_hold_release
+                      timeout: "{{ brightness_hold_interval }}"
+                      continue_on_timeout: true
+                  until:
+                    - "{{ wait.trigger is not none or repeat.index >= brightness_hold_max_steps }}"
+      - conditions: "{{ command == 'up_long_release' }}"
+        sequence:
+          - sequence: !input up_long_release
+          - if: "{{ up_has_light and up_button_mode == 'normal' }}"
+            then:
+              - parallel:
+                  - if: "{{ 'turn_on' in up_long_release_light_mode }}"
+                    then:
+                      - choose:
+                          - conditions: "{{ up_long_release_reset_brightness and up_long_release_reset_color }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ up_light }}"
+                                data:
+                                  brightness_pct: "{{ up_brightness_pct }}"
+                                  color_temp_kelvin: "{{ up_color_temp_kelvin }}"
+                                  transition: "{{ up_transition }}"
+                          - conditions: "{{ up_long_release_reset_brightness }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ up_light }}"
+                                data:
+                                  brightness_pct: "{{ up_brightness_pct }}"
+                                  transition: "{{ up_transition }}"
+                          - conditions: "{{ up_long_release_reset_color }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ up_light }}"
+                                data:
+                                  color_temp_kelvin: "{{ up_color_temp_kelvin }}"
+                                  transition: "{{ up_transition }}"
+                        default:
+                          - action: light.turn_on
+                            target: "{{ up_light }}"
+                            data:
+                              transition: "{{ up_transition }}"
+                  - if: "{{ 'turn_off' in up_long_release_light_mode }}"
+                    then:
+                      - action: light.turn_off
+                        target: "{{ up_light }}"
+                        data:
+                          transition: "{{ up_transition }}"
+                  - if: "{{ 'toggle' in up_long_release_light_mode }}"
+                    then:
+                      - choose:
+                          - conditions: "{{ up_long_release_reset_brightness and up_long_release_reset_color }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ up_light }}"
+                                data:
+                                  brightness_pct: "{{ up_brightness_pct }}"
+                                  color_temp_kelvin: "{{ up_color_temp_kelvin }}"
+                                  transition: "{{ up_transition }}"
+                          - conditions: "{{ up_long_release_reset_brightness }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ up_light }}"
+                                data:
+                                  brightness_pct: "{{ up_brightness_pct }}"
+                                  transition: "{{ up_transition }}"
+                          - conditions: "{{ up_long_release_reset_color }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ up_light }}"
+                                data:
+                                  color_temp_kelvin: "{{ up_color_temp_kelvin }}"
+                                  transition: "{{ up_transition }}"
+                        default:
+                          - action: light.toggle
+                            target: "{{ up_light }}"
+                            data:
+                              transition: "{{ up_transition }}"
+      - conditions: "{{ command == 'up_double_press' }}"
+        sequence:
+          - sequence: !input up_double
+          - if: "{{ up_has_light and up_button_mode == 'normal' }}"
+            then:
+              - parallel:
+                  - if: "{{ 'turn_on' in up_double_light_mode }}"
+                    then:
+                      - action: light.turn_on
+                        target: "{{ up_light }}"
+                        data:
+                          brightness_pct: "{{ up_brightness_pct }}"
+                          color_temp_kelvin: "{{ up_color_temp_kelvin }}"
+                          transition: "{{ up_transition }}"
+                  - if: "{{ 'turn_off' in up_double_light_mode }}"
+                    then:
+                      - action: light.turn_off
+                        target: "{{ up_light }}"
+                        data:
+                          transition: "{{ up_transition }}"
+                  - if: "{{ 'toggle' in up_double_light_mode }}"
+                    then:
+                      - action: light.toggle
+                        target: "{{ up_light }}"
+                        data:
+                          brightness_pct: "{{ up_brightness_pct }}"
+                          color_temp_kelvin: "{{ up_color_temp_kelvin }}"
+                          transition: "{{ up_transition }}"
+      - conditions: "{{ command == 'down_press' }}"
+        sequence: !input down_press
+      - conditions: "{{ command == 'down_short_release' }}"
+        sequence:
+          - sequence: !input down_short_release
+          - if: "{{ down_button_mode == 'brightness' and dim_has_light }}"
+            then:
+              - action: light.turn_on
+                target: "{{ dim_target }}"
+                data:
+                  brightness_step_pct: "-{{ brightness_step_pct }}"
+                  transition: "{{ brightness_hold_interval }}"
+          - if: "{{ down_has_light and down_button_mode == 'normal' }}"
+            then:
+              - parallel:
+                  - if: "{{ 'turn_on' in down_short_release_light_mode }}"
+                    then:
+                      - choose:
+                          - conditions: "{{ down_short_release_reset_brightness and down_short_release_reset_color }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ down_light }}"
+                                data:
+                                  brightness_pct: "{{ down_brightness_pct }}"
+                                  color_temp_kelvin: "{{ down_color_temp_kelvin }}"
+                                  transition: "{{ down_transition }}"
+                          - conditions: "{{ down_short_release_reset_brightness }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ down_light }}"
+                                data:
+                                  brightness_pct: "{{ down_brightness_pct }}"
+                                  transition: "{{ down_transition }}"
+                          - conditions: "{{ down_short_release_reset_color }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ down_light }}"
+                                data:
+                                  color_temp_kelvin: "{{ down_color_temp_kelvin }}"
+                                  transition: "{{ down_transition }}"
+                        default:
+                          - action: light.turn_on
+                            target: "{{ down_light }}"
+                            data:
+                              transition: "{{ down_transition }}"
+                  - if: "{{ 'turn_off' in down_short_release_light_mode }}"
+                    then:
+                      - action: light.turn_off
+                        target: "{{ down_light }}"
+                        data:
+                          transition: "{{ down_transition }}"
+                  - if: "{{ 'toggle' in down_short_release_light_mode }}"
+                    then:
+                      - choose:
+                          - conditions: "{{ down_short_release_reset_brightness and down_short_release_reset_color }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ down_light }}"
+                                data:
+                                  brightness_pct: "{{ down_brightness_pct }}"
+                                  color_temp_kelvin: "{{ down_color_temp_kelvin }}"
+                                  transition: "{{ down_transition }}"
+                          - conditions: "{{ down_short_release_reset_brightness }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ down_light }}"
+                                data:
+                                  brightness_pct: "{{ down_brightness_pct }}"
+                                  transition: "{{ down_transition }}"
+                          - conditions: "{{ down_short_release_reset_color }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ down_light }}"
+                                data:
+                                  color_temp_kelvin: "{{ down_color_temp_kelvin }}"
+                                  transition: "{{ down_transition }}"
+                        default:
+                          - action: light.toggle
+                            target: "{{ down_light }}"
+                            data:
+                              transition: "{{ down_transition }}"
+      - conditions: "{{ command == 'down_hold' }}"
+        sequence:
+          - sequence: !input down_hold
+          - if: "{{ down_button_mode == 'brightness' and dim_has_light }}"
+            then:
+              - alias: Step brightness until the button is released
+                repeat:
+                  sequence:
+                    - action: light.turn_on
+                      target: "{{ dim_target }}"
+                      data:
+                        brightness_step_pct: "-{{ brightness_step_pct }}"
+                        transition: "{{ brightness_hold_interval }}"
+                    - wait_for_trigger:
+                        - trigger: event
+                          event_type: zha_event
+                          event_data:
+                            device_id: !input zha_remote
+                            command: down_long_release
+                        - trigger: mqtt
+                          topic: "{{ z2m_base_topic ~ '/' ~ z2m_device_name }}"
+                          value_template: "{{ value_json.action | default('') }}"
+                          payload: down_hold_release
+                      timeout: "{{ brightness_hold_interval }}"
+                      continue_on_timeout: true
+                  until:
+                    - "{{ wait.trigger is not none or repeat.index >= brightness_hold_max_steps }}"
+      - conditions: "{{ command == 'down_long_release' }}"
+        sequence:
+          - sequence: !input down_long_release
+          - if: "{{ down_has_light and down_button_mode == 'normal' }}"
+            then:
+              - parallel:
+                  - if: "{{ 'turn_on' in down_long_release_light_mode }}"
+                    then:
+                      - choose:
+                          - conditions: "{{ down_long_release_reset_brightness and down_long_release_reset_color }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ down_light }}"
+                                data:
+                                  brightness_pct: "{{ down_brightness_pct }}"
+                                  color_temp_kelvin: "{{ down_color_temp_kelvin }}"
+                                  transition: "{{ down_transition }}"
+                          - conditions: "{{ down_long_release_reset_brightness }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ down_light }}"
+                                data:
+                                  brightness_pct: "{{ down_brightness_pct }}"
+                                  transition: "{{ down_transition }}"
+                          - conditions: "{{ down_long_release_reset_color }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ down_light }}"
+                                data:
+                                  color_temp_kelvin: "{{ down_color_temp_kelvin }}"
+                                  transition: "{{ down_transition }}"
+                        default:
+                          - action: light.turn_on
+                            target: "{{ down_light }}"
+                            data:
+                              transition: "{{ down_transition }}"
+                  - if: "{{ 'turn_off' in down_long_release_light_mode }}"
+                    then:
+                      - action: light.turn_off
+                        target: "{{ down_light }}"
+                        data:
+                          transition: "{{ down_transition }}"
+                  - if: "{{ 'toggle' in down_long_release_light_mode }}"
+                    then:
+                      - choose:
+                          - conditions: "{{ down_long_release_reset_brightness and down_long_release_reset_color }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ down_light }}"
+                                data:
+                                  brightness_pct: "{{ down_brightness_pct }}"
+                                  color_temp_kelvin: "{{ down_color_temp_kelvin }}"
+                                  transition: "{{ down_transition }}"
+                          - conditions: "{{ down_long_release_reset_brightness }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ down_light }}"
+                                data:
+                                  brightness_pct: "{{ down_brightness_pct }}"
+                                  transition: "{{ down_transition }}"
+                          - conditions: "{{ down_long_release_reset_color }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ down_light }}"
+                                data:
+                                  color_temp_kelvin: "{{ down_color_temp_kelvin }}"
+                                  transition: "{{ down_transition }}"
+                        default:
+                          - action: light.toggle
+                            target: "{{ down_light }}"
+                            data:
+                              transition: "{{ down_transition }}"
+      - conditions: "{{ command == 'down_double_press' }}"
+        sequence:
+          - sequence: !input down_double
+          - if: "{{ down_has_light and down_button_mode == 'normal' }}"
+            then:
+              - parallel:
+                  - if: "{{ 'turn_on' in down_double_light_mode }}"
+                    then:
+                      - action: light.turn_on
+                        target: "{{ down_light }}"
+                        data:
+                          brightness_pct: "{{ down_brightness_pct }}"
+                          color_temp_kelvin: "{{ down_color_temp_kelvin }}"
+                          transition: "{{ down_transition }}"
+                  - if: "{{ 'turn_off' in down_double_light_mode }}"
+                    then:
+                      - action: light.turn_off
+                        target: "{{ down_light }}"
+                        data:
+                          transition: "{{ down_transition }}"
+                  - if: "{{ 'toggle' in down_double_light_mode }}"
+                    then:
+                      - action: light.toggle
+                        target: "{{ down_light }}"
+                        data:
+                          brightness_pct: "{{ down_brightness_pct }}"
+                          color_temp_kelvin: "{{ down_color_temp_kelvin }}"
+                          transition: "{{ down_transition }}"
+      - conditions: "{{ command == 'hue_press' }}"
+        sequence: !input hue_press
+      - conditions: "{{ command == 'hue_short_release' }}"
+        sequence:
+          - sequence: !input hue_short_release
+          - if: "{{ hue_has_light }}"
+            then:
+              - parallel:
+                  - if: "{{ 'turn_on' in hue_short_release_light_mode }}"
+                    then:
+                      - choose:
+                          - conditions: "{{ hue_short_release_reset_brightness and hue_short_release_reset_color }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ hue_light }}"
+                                data:
+                                  brightness_pct: "{{ hue_brightness_pct }}"
+                                  color_temp_kelvin: "{{ hue_color_temp_kelvin }}"
+                                  transition: "{{ hue_transition }}"
+                          - conditions: "{{ hue_short_release_reset_brightness }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ hue_light }}"
+                                data:
+                                  brightness_pct: "{{ hue_brightness_pct }}"
+                                  transition: "{{ hue_transition }}"
+                          - conditions: "{{ hue_short_release_reset_color }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ hue_light }}"
+                                data:
+                                  color_temp_kelvin: "{{ hue_color_temp_kelvin }}"
+                                  transition: "{{ hue_transition }}"
+                        default:
+                          - action: light.turn_on
+                            target: "{{ hue_light }}"
+                            data:
+                              transition: "{{ hue_transition }}"
+                  - if: "{{ 'turn_off' in hue_short_release_light_mode }}"
+                    then:
+                      - action: light.turn_off
+                        target: "{{ hue_light }}"
+                        data:
+                          transition: "{{ hue_transition }}"
+                  - if: "{{ 'toggle' in hue_short_release_light_mode }}"
+                    then:
+                      - choose:
+                          - conditions: "{{ hue_short_release_reset_brightness and hue_short_release_reset_color }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ hue_light }}"
+                                data:
+                                  brightness_pct: "{{ hue_brightness_pct }}"
+                                  color_temp_kelvin: "{{ hue_color_temp_kelvin }}"
+                                  transition: "{{ hue_transition }}"
+                          - conditions: "{{ hue_short_release_reset_brightness }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ hue_light }}"
+                                data:
+                                  brightness_pct: "{{ hue_brightness_pct }}"
+                                  transition: "{{ hue_transition }}"
+                          - conditions: "{{ hue_short_release_reset_color }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ hue_light }}"
+                                data:
+                                  color_temp_kelvin: "{{ hue_color_temp_kelvin }}"
+                                  transition: "{{ hue_transition }}"
+                        default:
+                          - action: light.toggle
+                            target: "{{ hue_light }}"
+                            data:
+                              transition: "{{ hue_transition }}"
+      - conditions: "{{ command == 'hue_hold' }}"
+        sequence: !input hue_hold
+      - conditions: "{{ command == 'hue_long_release' }}"
+        sequence:
+          - sequence: !input hue_long_release
+          - if: "{{ hue_has_light }}"
+            then:
+              - parallel:
+                  - if: "{{ 'turn_on' in hue_long_release_light_mode }}"
+                    then:
+                      - choose:
+                          - conditions: "{{ hue_long_release_reset_brightness and hue_long_release_reset_color }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ hue_light }}"
+                                data:
+                                  brightness_pct: "{{ hue_brightness_pct }}"
+                                  color_temp_kelvin: "{{ hue_color_temp_kelvin }}"
+                                  transition: "{{ hue_transition }}"
+                          - conditions: "{{ hue_long_release_reset_brightness }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ hue_light }}"
+                                data:
+                                  brightness_pct: "{{ hue_brightness_pct }}"
+                                  transition: "{{ hue_transition }}"
+                          - conditions: "{{ hue_long_release_reset_color }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ hue_light }}"
+                                data:
+                                  color_temp_kelvin: "{{ hue_color_temp_kelvin }}"
+                                  transition: "{{ hue_transition }}"
+                        default:
+                          - action: light.turn_on
+                            target: "{{ hue_light }}"
+                            data:
+                              transition: "{{ hue_transition }}"
+                  - if: "{{ 'turn_off' in hue_long_release_light_mode }}"
+                    then:
+                      - action: light.turn_off
+                        target: "{{ hue_light }}"
+                        data:
+                          transition: "{{ hue_transition }}"
+                  - if: "{{ 'toggle' in hue_long_release_light_mode }}"
+                    then:
+                      - choose:
+                          - conditions: "{{ hue_long_release_reset_brightness and hue_long_release_reset_color }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ hue_light }}"
+                                data:
+                                  brightness_pct: "{{ hue_brightness_pct }}"
+                                  color_temp_kelvin: "{{ hue_color_temp_kelvin }}"
+                                  transition: "{{ hue_transition }}"
+                          - conditions: "{{ hue_long_release_reset_brightness }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ hue_light }}"
+                                data:
+                                  brightness_pct: "{{ hue_brightness_pct }}"
+                                  transition: "{{ hue_transition }}"
+                          - conditions: "{{ hue_long_release_reset_color }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ hue_light }}"
+                                data:
+                                  color_temp_kelvin: "{{ hue_color_temp_kelvin }}"
+                                  transition: "{{ hue_transition }}"
+                        default:
+                          - action: light.toggle
+                            target: "{{ hue_light }}"
+                            data:
+                              transition: "{{ hue_transition }}"
+      - conditions: "{{ command == 'hue_double_press' }}"
+        sequence:
+          - sequence: !input hue_double
+          - if: "{{ hue_has_light }}"
+            then:
+              - parallel:
+                  - if: "{{ 'turn_on' in hue_double_light_mode }}"
+                    then:
+                      - action: light.turn_on
+                        target: "{{ hue_light }}"
+                        data:
+                          brightness_pct: "{{ hue_brightness_pct }}"
+                          color_temp_kelvin: "{{ hue_color_temp_kelvin }}"
+                          transition: "{{ hue_transition }}"
+                  - if: "{{ 'turn_off' in hue_double_light_mode }}"
+                    then:
+                      - action: light.turn_off
+                        target: "{{ hue_light }}"
+                        data:
+                          transition: "{{ hue_transition }}"
+                  - if: "{{ 'toggle' in hue_double_light_mode }}"
+                    then:
+                      - action: light.toggle
+                        target: "{{ hue_light }}"
+                        data:
+                          brightness_pct: "{{ hue_brightness_pct }}"
+                          color_temp_kelvin: "{{ hue_color_temp_kelvin }}"
+                          transition: "{{ hue_transition }}"
