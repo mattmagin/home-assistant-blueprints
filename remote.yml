@@ -27,7 +27,7 @@ blueprint:
     - **4 Buttons**: Short press, long press and double press, with built-in light actions
     - **Light Mode**: Control lights with brightness, color temperature, and transitions. Adjustment Mode can apply static, adaptive, or schedule values, or keep the previous brightness and color temperature.
     - **Switchable Brightness Buttons**: Run the up/down buttons as dimmers, or as ordinary buttons with their own light actions
-    - **Context-Aware Dimming**: In brightness mode the up/down buttons dim whichever button was last pressed
+    - **Context-Aware Dimming**: In brightness mode the up/down buttons dim whichever button was last pressed, preferring a group that is still on when the last-pressed lights are off
     - **Hold to Ramp**: Holding a brightness button steps repeatedly until you let go, at a configurable speed
     - **Adaptive Lighting Support**: Time-based brightness and color temperature via schedule helpers and adaptive lighting sensors
     - **Auto-Adjust**: Automatically update lights when adaptive or schedule values change, independently for brightness and color temperature
@@ -61,6 +61,7 @@ blueprint:
           - Removed: Short Press custom actions. Those fired on ZHA `*_press` events; Z2M only exposes the matching release, so the slot could never run.
           - Removed: all remaining custom action slots. The blueprint is lights-only; button events now run Light Mode (and brightness control) only.
           - Added: "Previous" Light Adjustment Mode. Turn on / toggle leaves brightness and color temperature as the lights last had them, instead of applying static, adaptive, or schedule values.
+          - Added: Prefer Lights That Are On. Dimming skips a last-pressed group that is fully off and retargets (and updates the helper) to another button whose lights are still on.
           - Removed: triple, quadruple and quintuple press. These were ZHA-only events; double press is synthesised on Z2M and remains.
           - Removed: all dial rotation logic, along with the per-button Dimming Speed inputs it used. Dimming Speed is now a single setting in Brightness Control.
           - Removed: all media player support.
@@ -160,9 +161,13 @@ blueprint:
         When a brightness button is held or pressed, it dims the lights belonging to the button
         named here. **Each switch requires its own unique helper.**
 
-        A button in Brightness Control mode never writes to this helper, so dimming does not
-        steal the target away from the button whose lights you are adjusting. That means the
-        helper normally alternates between `power` and `hue`.
+        A button in Brightness Control mode never writes this helper to `up` or `down`, so
+        dimming does not steal the target. The helper normally alternates between `power`
+        and `hue`.
+
+        If **Prefer Lights That Are On** is enabled (the default) and the last-pressed
+        button's lights are all off, dimming retargets to another button whose lights are
+        still on and updates this helper to match.
 
         Until a button has been pressed the helper is empty, and dimming falls back to the
         Fallback Lights target, or to the Power button's lights if that is also empty.
@@ -295,7 +300,9 @@ blueprint:
             `optional` `select`
 
             **Brightness Control**: the button dims the lights of whichever button was last
-            pressed, tracked by the Last Pressed helper. Its own Light Mode actions are ignored.
+            pressed, tracked by the Last Pressed helper. If Prefer Lights That Are On is
+            enabled and those lights are off, it dims another button's lights that are still
+            on. Its own Light Mode actions are ignored.
 
             **Normal Button**: the button behaves like the Power and Hue buttons, running its
             own Light Mode actions and becoming the new Last Pressed target.
@@ -315,7 +322,9 @@ blueprint:
             `optional` `select`
 
             **Brightness Control**: the button dims the lights of whichever button was last
-            pressed, tracked by the Last Pressed helper. Its own Light Mode actions are ignored.
+            pressed, tracked by the Last Pressed helper. If Prefer Lights That Are On is
+            enabled and those lights are off, it dims another button's lights that are still
+            on. Its own Light Mode actions are ignored.
 
             **Normal Button**: the button behaves like the Power and Hue buttons, running its
             own Light Mode actions and becoming the new Last Pressed target.
@@ -344,6 +353,21 @@ blueprint:
               max: 10
               step: 1
               mode: slider
+        prefer_on_lights:
+          name: Prefer Lights That Are On
+          description: |-
+            `optional` `boolean`
+
+            When dimming, if the last-pressed button's lights are all off, use another
+            button's lights that are still on. In a room with a lamp and a sconce, turning
+            the sconce off then dimming will target the lamp.
+
+            If several groups are on, the last-pressed button still wins. If every group
+            is off, dimming stays on the last-pressed button (or Fallback Lights).
+            When this retargets, the Last Pressed helper is updated to match.
+          default: true
+          selector:
+            boolean: {}
         brightness_fallback_light:
           name: Fallback Lights
           description: |-
@@ -1754,12 +1778,27 @@ variables:
   down_button_mode: !input down_button_mode
   brightness_speed: !input brightness_speed
   brightness_fallback_light: !input brightness_fallback_light
+  prefer_on_lights: !input prefer_on_lights
   brightness_step_pct: "{{ (brightness_speed | int(5)) * 2 }}"
   brightness_hold_interval: 0.5
   brightness_hold_max_steps: 60
   dim_button: |-
-    {% set b = states(last_pressed) %}
-    {{ b if b in ['power', 'up', 'down', 'hue'] else '' }}
+    {% set last = states(last_pressed) %}
+    {% set last = last if last in ['power', 'up', 'down', 'hue'] else '' %}
+    {% if not prefer_on_lights %}
+      {{ last }}
+    {% else %}
+      {% set ns = namespace(found='') %}
+      {% for b in [last, 'power', 'hue', 'up', 'down'] %}
+        {% if ns.found == '' and b != '' %}
+          {% set ents = power_light_entities if b == 'power' else (up_light_entities if b == 'up' else (down_light_entities if b == 'down' else hue_light_entities)) %}
+          {% if ents | select('is_state', 'on') | list | length > 0 %}
+            {% set ns.found = b %}
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+      {{ ns.found if ns.found != '' else last }}
+    {% endif %}
   dim_target: |-
     {% if dim_button == 'power' %}{{ power_light }}
     {% elif dim_button == 'up' %}{{ up_light }}
@@ -1862,6 +1901,18 @@ actions:
           entity_id: "{{ last_pressed }}"
         data:
           value: "{{ event_button }}"
+  - alias: Retarget last pressed helper to an on light group when dimming
+    if:
+      - "{{ prefer_on_lights }}"
+      - "{{ (event_button == 'up' and up_button_mode == 'brightness') or (event_button == 'down' and down_button_mode == 'brightness') }}"
+      - "{{ dim_button != '' }}"
+      - "{{ dim_button != states(last_pressed) }}"
+    then:
+      - action: input_text.set_value
+        target:
+          entity_id: "{{ last_pressed }}"
+        data:
+          value: "{{ dim_button }}"
   - choose:
       - conditions:
           - "{{ trigger.id in ['adaptive_power_brightness_change', 'adaptive_power_color_change', 'adaptive_up_brightness_change', 'adaptive_up_color_change', 'adaptive_down_brightness_change', 'adaptive_down_color_change', 'adaptive_hue_brightness_change', 'adaptive_hue_color_change', 'schedule_power_change', 'schedule_up_change', 'schedule_down_change', 'schedule_hue_change'] }}"
