@@ -25,7 +25,7 @@ blueprint:
 
     ## ✨ Key Features
     - **4 Buttons**: Short press, long press and double press, with built-in light actions
-    - **Light Mode**: Control lights with brightness, color temperature, and transitions
+    - **Light Mode**: Control lights with brightness, color temperature, and transitions. Adjustment Mode can apply static, adaptive, or schedule values, or keep the previous brightness and color temperature.
     - **Switchable Brightness Buttons**: Run the up/down buttons as dimmers, or as ordinary buttons with their own light actions
     - **Context-Aware Dimming**: In brightness mode the up/down buttons dim whichever button was last pressed
     - **Hold to Ramp**: Holding a brightness button steps repeatedly until you let go, at a configurable speed
@@ -60,6 +60,7 @@ blueprint:
           - Removed: ZHA support. The Integration Type selector and the ZHA section are gone, along with the `zha_event` trigger and the integration guard.
           - Removed: Short Press custom actions. Those fired on ZHA `*_press` events; Z2M only exposes the matching release, so the slot could never run.
           - Removed: all remaining custom action slots. The blueprint is lights-only; button events now run Light Mode (and brightness control) only.
+          - Added: "Previous" Light Adjustment Mode. Turn on / toggle leaves brightness and color temperature as the lights last had them, instead of applying static, adaptive, or schedule values.
           - Removed: triple, quadruple and quintuple press. These were ZHA-only events; double press is synthesised on Z2M and remains.
           - Removed: all dial rotation logic, along with the per-button Dimming Speed inputs it used. Dimming Speed is now a single setting in Brightness Control.
           - Removed: all media player support.
@@ -446,6 +447,7 @@ blueprint:
 
             Choose where brightness and color temperature values come from:
             - **Static**: Use the default values configured below
+            - **Previous**: Leave brightness and color temperature as they already are
             - **Adaptive**: Use input_number helpers updated by the Adaptive Lighting Scheduler blueprint
             - **Schedule**: Use a schedule entity for time-based adjustments
           default: static
@@ -454,6 +456,8 @@ blueprint:
               options:
                 - label: Static
                   value: static
+                - label: Previous
+                  value: previous
                 - label: Adaptive
                   value: adaptive
                 - label: Schedule
@@ -693,6 +697,7 @@ blueprint:
 
             Choose where brightness and color temperature values come from:
             - **Static**: Use the default values configured below
+            - **Previous**: Leave brightness and color temperature as they already are
             - **Adaptive**: Use input_number helpers updated by the Adaptive Lighting Scheduler blueprint
             - **Schedule**: Use a schedule entity for time-based adjustments
           default: static
@@ -701,6 +706,8 @@ blueprint:
               options:
                 - label: Static
                   value: static
+                - label: Previous
+                  value: previous
                 - label: Adaptive
                   value: adaptive
                 - label: Schedule
@@ -940,6 +947,7 @@ blueprint:
 
             Choose where brightness and color temperature values come from:
             - **Static**: Use the default values configured below
+            - **Previous**: Leave brightness and color temperature as they already are
             - **Adaptive**: Use input_number helpers updated by the Adaptive Lighting Scheduler blueprint
             - **Schedule**: Use a schedule entity for time-based adjustments
           default: static
@@ -948,6 +956,8 @@ blueprint:
               options:
                 - label: Static
                   value: static
+                - label: Previous
+                  value: previous
                 - label: Adaptive
                   value: adaptive
                 - label: Schedule
@@ -1187,6 +1197,7 @@ blueprint:
 
             Choose where brightness and color temperature values come from:
             - **Static**: Use the default values configured below
+            - **Previous**: Leave brightness and color temperature as they already are
             - **Adaptive**: Use input_number helpers updated by the Adaptive Lighting Scheduler blueprint
             - **Schedule**: Use a schedule entity for time-based adjustments
           default: static
@@ -1195,6 +1206,8 @@ blueprint:
               options:
                 - label: Static
                   value: static
+                - label: Previous
+                  value: previous
                 - label: Adaptive
                   value: adaptive
                 - label: Schedule
@@ -1383,6 +1396,7 @@ variables:
   z2m_button: "{{ {'power': 'on', 'up': 'up', 'down': 'down', 'hue': 'off'}.get(event_button, '') }}"
   power_light: !input power_light
   power_adjustment_mode: !input power_light_adjustment_mode
+  power_use_previous: "{{ power_adjustment_mode == 'previous' }}"
   power_adaptive_brightness: !input power_light_adaptive_brightness
   power_adaptive_color_temp: !input power_light_adaptive_color_temp
   power_schedule: !input power_light_schedule
@@ -1471,6 +1485,7 @@ variables:
     {{ ns.entities }}
   up_light: !input up_light
   up_adjustment_mode: !input up_light_adjustment_mode
+  up_use_previous: "{{ up_adjustment_mode == 'previous' }}"
   up_adaptive_brightness: !input up_light_adaptive_brightness
   up_adaptive_color_temp: !input up_light_adaptive_color_temp
   up_schedule: !input up_light_schedule
@@ -1559,6 +1574,7 @@ variables:
     {{ ns.entities }}
   down_light: !input down_light
   down_adjustment_mode: !input down_light_adjustment_mode
+  down_use_previous: "{{ down_adjustment_mode == 'previous' }}"
   down_adaptive_brightness: !input down_light_adaptive_brightness
   down_adaptive_color_temp: !input down_light_adaptive_color_temp
   down_schedule: !input down_light_schedule
@@ -1647,6 +1663,7 @@ variables:
     {{ ns.entities }}
   hue_light: !input hue_light
   hue_adjustment_mode: !input hue_light_adjustment_mode
+  hue_use_previous: "{{ hue_adjustment_mode == 'previous' }}"
   hue_adaptive_brightness: !input hue_light_adaptive_brightness
   hue_adaptive_color_temp: !input hue_light_adaptive_color_temp
   hue_schedule: !input hue_light_schedule
@@ -2006,7 +2023,7 @@ actions:
                   - if: "{{ 'turn_on' in power_short_release_light_mode }}"
                     then:
                       - choose:
-                          - conditions: "{{ power_short_release_reset_brightness and power_short_release_reset_color }}"
+                          - conditions: "{{ not power_use_previous and power_short_release_reset_brightness and power_short_release_reset_color }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ power_light }}"
@@ -2014,14 +2031,14 @@ actions:
                                   brightness_pct: "{{ power_brightness_pct }}"
                                   color_temp_kelvin: "{{ power_color_temp_kelvin }}"
                                   transition: "{{ power_transition }}"
-                          - conditions: "{{ power_short_release_reset_brightness }}"
+                          - conditions: "{{ not power_use_previous and power_short_release_reset_brightness }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ power_light }}"
                                 data:
                                   brightness_pct: "{{ power_brightness_pct }}"
                                   transition: "{{ power_transition }}"
-                          - conditions: "{{ power_short_release_reset_color }}"
+                          - conditions: "{{ not power_use_previous and power_short_release_reset_color }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ power_light }}"
@@ -2042,7 +2059,7 @@ actions:
                   - if: "{{ 'toggle' in power_short_release_light_mode }}"
                     then:
                       - choose:
-                          - conditions: "{{ power_short_release_reset_brightness and power_short_release_reset_color }}"
+                          - conditions: "{{ not power_use_previous and power_short_release_reset_brightness and power_short_release_reset_color }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ power_light }}"
@@ -2050,14 +2067,14 @@ actions:
                                   brightness_pct: "{{ power_brightness_pct }}"
                                   color_temp_kelvin: "{{ power_color_temp_kelvin }}"
                                   transition: "{{ power_transition }}"
-                          - conditions: "{{ power_short_release_reset_brightness }}"
+                          - conditions: "{{ not power_use_previous and power_short_release_reset_brightness }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ power_light }}"
                                 data:
                                   brightness_pct: "{{ power_brightness_pct }}"
                                   transition: "{{ power_transition }}"
-                          - conditions: "{{ power_short_release_reset_color }}"
+                          - conditions: "{{ not power_use_previous and power_short_release_reset_color }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ power_light }}"
@@ -2077,7 +2094,7 @@ actions:
                   - if: "{{ 'turn_on' in power_long_release_light_mode }}"
                     then:
                       - choose:
-                          - conditions: "{{ power_long_release_reset_brightness and power_long_release_reset_color }}"
+                          - conditions: "{{ not power_use_previous and power_long_release_reset_brightness and power_long_release_reset_color }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ power_light }}"
@@ -2085,14 +2102,14 @@ actions:
                                   brightness_pct: "{{ power_brightness_pct }}"
                                   color_temp_kelvin: "{{ power_color_temp_kelvin }}"
                                   transition: "{{ power_transition }}"
-                          - conditions: "{{ power_long_release_reset_brightness }}"
+                          - conditions: "{{ not power_use_previous and power_long_release_reset_brightness }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ power_light }}"
                                 data:
                                   brightness_pct: "{{ power_brightness_pct }}"
                                   transition: "{{ power_transition }}"
-                          - conditions: "{{ power_long_release_reset_color }}"
+                          - conditions: "{{ not power_use_previous and power_long_release_reset_color }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ power_light }}"
@@ -2113,7 +2130,7 @@ actions:
                   - if: "{{ 'toggle' in power_long_release_light_mode }}"
                     then:
                       - choose:
-                          - conditions: "{{ power_long_release_reset_brightness and power_long_release_reset_color }}"
+                          - conditions: "{{ not power_use_previous and power_long_release_reset_brightness and power_long_release_reset_color }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ power_light }}"
@@ -2121,14 +2138,14 @@ actions:
                                   brightness_pct: "{{ power_brightness_pct }}"
                                   color_temp_kelvin: "{{ power_color_temp_kelvin }}"
                                   transition: "{{ power_transition }}"
-                          - conditions: "{{ power_long_release_reset_brightness }}"
+                          - conditions: "{{ not power_use_previous and power_long_release_reset_brightness }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ power_light }}"
                                 data:
                                   brightness_pct: "{{ power_brightness_pct }}"
                                   transition: "{{ power_transition }}"
-                          - conditions: "{{ power_long_release_reset_color }}"
+                          - conditions: "{{ not power_use_previous and power_long_release_reset_color }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ power_light }}"
@@ -2147,12 +2164,20 @@ actions:
               - parallel:
                   - if: "{{ 'turn_on' in power_double_light_mode }}"
                     then:
-                      - action: light.turn_on
-                        target: "{{ power_light }}"
-                        data:
-                          brightness_pct: "{{ power_brightness_pct }}"
-                          color_temp_kelvin: "{{ power_color_temp_kelvin }}"
-                          transition: "{{ power_transition }}"
+                      - choose:
+                          - conditions: "{{ not power_use_previous }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ power_light }}"
+                                data:
+                                  brightness_pct: "{{ power_brightness_pct }}"
+                                  color_temp_kelvin: "{{ power_color_temp_kelvin }}"
+                                  transition: "{{ power_transition }}"
+                        default:
+                          - action: light.turn_on
+                            target: "{{ power_light }}"
+                            data:
+                              transition: "{{ power_transition }}"
                   - if: "{{ 'turn_off' in power_double_light_mode }}"
                     then:
                       - action: light.turn_off
@@ -2161,12 +2186,20 @@ actions:
                           transition: "{{ power_transition }}"
                   - if: "{{ 'toggle' in power_double_light_mode }}"
                     then:
-                      - action: light.toggle
-                        target: "{{ power_light }}"
-                        data:
-                          brightness_pct: "{{ power_brightness_pct }}"
-                          color_temp_kelvin: "{{ power_color_temp_kelvin }}"
-                          transition: "{{ power_transition }}"
+                      - choose:
+                          - conditions: "{{ not power_use_previous }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ power_light }}"
+                                data:
+                                  brightness_pct: "{{ power_brightness_pct }}"
+                                  color_temp_kelvin: "{{ power_color_temp_kelvin }}"
+                                  transition: "{{ power_transition }}"
+                        default:
+                          - action: light.toggle
+                            target: "{{ power_light }}"
+                            data:
+                              transition: "{{ power_transition }}"
       - conditions: "{{ command == 'up_short_release' }}"
         sequence:
           - if: "{{ up_button_mode == 'brightness' and dim_has_light }}"
@@ -2182,7 +2215,7 @@ actions:
                   - if: "{{ 'turn_on' in up_short_release_light_mode }}"
                     then:
                       - choose:
-                          - conditions: "{{ up_short_release_reset_brightness and up_short_release_reset_color }}"
+                          - conditions: "{{ not up_use_previous and up_short_release_reset_brightness and up_short_release_reset_color }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ up_light }}"
@@ -2190,14 +2223,14 @@ actions:
                                   brightness_pct: "{{ up_brightness_pct }}"
                                   color_temp_kelvin: "{{ up_color_temp_kelvin }}"
                                   transition: "{{ up_transition }}"
-                          - conditions: "{{ up_short_release_reset_brightness }}"
+                          - conditions: "{{ not up_use_previous and up_short_release_reset_brightness }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ up_light }}"
                                 data:
                                   brightness_pct: "{{ up_brightness_pct }}"
                                   transition: "{{ up_transition }}"
-                          - conditions: "{{ up_short_release_reset_color }}"
+                          - conditions: "{{ not up_use_previous and up_short_release_reset_color }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ up_light }}"
@@ -2218,7 +2251,7 @@ actions:
                   - if: "{{ 'toggle' in up_short_release_light_mode }}"
                     then:
                       - choose:
-                          - conditions: "{{ up_short_release_reset_brightness and up_short_release_reset_color }}"
+                          - conditions: "{{ not up_use_previous and up_short_release_reset_brightness and up_short_release_reset_color }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ up_light }}"
@@ -2226,14 +2259,14 @@ actions:
                                   brightness_pct: "{{ up_brightness_pct }}"
                                   color_temp_kelvin: "{{ up_color_temp_kelvin }}"
                                   transition: "{{ up_transition }}"
-                          - conditions: "{{ up_short_release_reset_brightness }}"
+                          - conditions: "{{ not up_use_previous and up_short_release_reset_brightness }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ up_light }}"
                                 data:
                                   brightness_pct: "{{ up_brightness_pct }}"
                                   transition: "{{ up_transition }}"
-                          - conditions: "{{ up_short_release_reset_color }}"
+                          - conditions: "{{ not up_use_previous and up_short_release_reset_color }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ up_light }}"
@@ -2274,7 +2307,7 @@ actions:
                   - if: "{{ 'turn_on' in up_long_release_light_mode }}"
                     then:
                       - choose:
-                          - conditions: "{{ up_long_release_reset_brightness and up_long_release_reset_color }}"
+                          - conditions: "{{ not up_use_previous and up_long_release_reset_brightness and up_long_release_reset_color }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ up_light }}"
@@ -2282,14 +2315,14 @@ actions:
                                   brightness_pct: "{{ up_brightness_pct }}"
                                   color_temp_kelvin: "{{ up_color_temp_kelvin }}"
                                   transition: "{{ up_transition }}"
-                          - conditions: "{{ up_long_release_reset_brightness }}"
+                          - conditions: "{{ not up_use_previous and up_long_release_reset_brightness }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ up_light }}"
                                 data:
                                   brightness_pct: "{{ up_brightness_pct }}"
                                   transition: "{{ up_transition }}"
-                          - conditions: "{{ up_long_release_reset_color }}"
+                          - conditions: "{{ not up_use_previous and up_long_release_reset_color }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ up_light }}"
@@ -2310,7 +2343,7 @@ actions:
                   - if: "{{ 'toggle' in up_long_release_light_mode }}"
                     then:
                       - choose:
-                          - conditions: "{{ up_long_release_reset_brightness and up_long_release_reset_color }}"
+                          - conditions: "{{ not up_use_previous and up_long_release_reset_brightness and up_long_release_reset_color }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ up_light }}"
@@ -2318,14 +2351,14 @@ actions:
                                   brightness_pct: "{{ up_brightness_pct }}"
                                   color_temp_kelvin: "{{ up_color_temp_kelvin }}"
                                   transition: "{{ up_transition }}"
-                          - conditions: "{{ up_long_release_reset_brightness }}"
+                          - conditions: "{{ not up_use_previous and up_long_release_reset_brightness }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ up_light }}"
                                 data:
                                   brightness_pct: "{{ up_brightness_pct }}"
                                   transition: "{{ up_transition }}"
-                          - conditions: "{{ up_long_release_reset_color }}"
+                          - conditions: "{{ not up_use_previous and up_long_release_reset_color }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ up_light }}"
@@ -2344,12 +2377,20 @@ actions:
               - parallel:
                   - if: "{{ 'turn_on' in up_double_light_mode }}"
                     then:
-                      - action: light.turn_on
-                        target: "{{ up_light }}"
-                        data:
-                          brightness_pct: "{{ up_brightness_pct }}"
-                          color_temp_kelvin: "{{ up_color_temp_kelvin }}"
-                          transition: "{{ up_transition }}"
+                      - choose:
+                          - conditions: "{{ not up_use_previous }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ up_light }}"
+                                data:
+                                  brightness_pct: "{{ up_brightness_pct }}"
+                                  color_temp_kelvin: "{{ up_color_temp_kelvin }}"
+                                  transition: "{{ up_transition }}"
+                        default:
+                          - action: light.turn_on
+                            target: "{{ up_light }}"
+                            data:
+                              transition: "{{ up_transition }}"
                   - if: "{{ 'turn_off' in up_double_light_mode }}"
                     then:
                       - action: light.turn_off
@@ -2358,12 +2399,20 @@ actions:
                           transition: "{{ up_transition }}"
                   - if: "{{ 'toggle' in up_double_light_mode }}"
                     then:
-                      - action: light.toggle
-                        target: "{{ up_light }}"
-                        data:
-                          brightness_pct: "{{ up_brightness_pct }}"
-                          color_temp_kelvin: "{{ up_color_temp_kelvin }}"
-                          transition: "{{ up_transition }}"
+                      - choose:
+                          - conditions: "{{ not up_use_previous }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ up_light }}"
+                                data:
+                                  brightness_pct: "{{ up_brightness_pct }}"
+                                  color_temp_kelvin: "{{ up_color_temp_kelvin }}"
+                                  transition: "{{ up_transition }}"
+                        default:
+                          - action: light.toggle
+                            target: "{{ up_light }}"
+                            data:
+                              transition: "{{ up_transition }}"
       - conditions: "{{ command == 'down_short_release' }}"
         sequence:
           - if: "{{ down_button_mode == 'brightness' and dim_has_light }}"
@@ -2379,7 +2428,7 @@ actions:
                   - if: "{{ 'turn_on' in down_short_release_light_mode }}"
                     then:
                       - choose:
-                          - conditions: "{{ down_short_release_reset_brightness and down_short_release_reset_color }}"
+                          - conditions: "{{ not down_use_previous and down_short_release_reset_brightness and down_short_release_reset_color }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ down_light }}"
@@ -2387,14 +2436,14 @@ actions:
                                   brightness_pct: "{{ down_brightness_pct }}"
                                   color_temp_kelvin: "{{ down_color_temp_kelvin }}"
                                   transition: "{{ down_transition }}"
-                          - conditions: "{{ down_short_release_reset_brightness }}"
+                          - conditions: "{{ not down_use_previous and down_short_release_reset_brightness }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ down_light }}"
                                 data:
                                   brightness_pct: "{{ down_brightness_pct }}"
                                   transition: "{{ down_transition }}"
-                          - conditions: "{{ down_short_release_reset_color }}"
+                          - conditions: "{{ not down_use_previous and down_short_release_reset_color }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ down_light }}"
@@ -2415,7 +2464,7 @@ actions:
                   - if: "{{ 'toggle' in down_short_release_light_mode }}"
                     then:
                       - choose:
-                          - conditions: "{{ down_short_release_reset_brightness and down_short_release_reset_color }}"
+                          - conditions: "{{ not down_use_previous and down_short_release_reset_brightness and down_short_release_reset_color }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ down_light }}"
@@ -2423,14 +2472,14 @@ actions:
                                   brightness_pct: "{{ down_brightness_pct }}"
                                   color_temp_kelvin: "{{ down_color_temp_kelvin }}"
                                   transition: "{{ down_transition }}"
-                          - conditions: "{{ down_short_release_reset_brightness }}"
+                          - conditions: "{{ not down_use_previous and down_short_release_reset_brightness }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ down_light }}"
                                 data:
                                   brightness_pct: "{{ down_brightness_pct }}"
                                   transition: "{{ down_transition }}"
-                          - conditions: "{{ down_short_release_reset_color }}"
+                          - conditions: "{{ not down_use_previous and down_short_release_reset_color }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ down_light }}"
@@ -2471,7 +2520,7 @@ actions:
                   - if: "{{ 'turn_on' in down_long_release_light_mode }}"
                     then:
                       - choose:
-                          - conditions: "{{ down_long_release_reset_brightness and down_long_release_reset_color }}"
+                          - conditions: "{{ not down_use_previous and down_long_release_reset_brightness and down_long_release_reset_color }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ down_light }}"
@@ -2479,14 +2528,14 @@ actions:
                                   brightness_pct: "{{ down_brightness_pct }}"
                                   color_temp_kelvin: "{{ down_color_temp_kelvin }}"
                                   transition: "{{ down_transition }}"
-                          - conditions: "{{ down_long_release_reset_brightness }}"
+                          - conditions: "{{ not down_use_previous and down_long_release_reset_brightness }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ down_light }}"
                                 data:
                                   brightness_pct: "{{ down_brightness_pct }}"
                                   transition: "{{ down_transition }}"
-                          - conditions: "{{ down_long_release_reset_color }}"
+                          - conditions: "{{ not down_use_previous and down_long_release_reset_color }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ down_light }}"
@@ -2507,7 +2556,7 @@ actions:
                   - if: "{{ 'toggle' in down_long_release_light_mode }}"
                     then:
                       - choose:
-                          - conditions: "{{ down_long_release_reset_brightness and down_long_release_reset_color }}"
+                          - conditions: "{{ not down_use_previous and down_long_release_reset_brightness and down_long_release_reset_color }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ down_light }}"
@@ -2515,14 +2564,14 @@ actions:
                                   brightness_pct: "{{ down_brightness_pct }}"
                                   color_temp_kelvin: "{{ down_color_temp_kelvin }}"
                                   transition: "{{ down_transition }}"
-                          - conditions: "{{ down_long_release_reset_brightness }}"
+                          - conditions: "{{ not down_use_previous and down_long_release_reset_brightness }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ down_light }}"
                                 data:
                                   brightness_pct: "{{ down_brightness_pct }}"
                                   transition: "{{ down_transition }}"
-                          - conditions: "{{ down_long_release_reset_color }}"
+                          - conditions: "{{ not down_use_previous and down_long_release_reset_color }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ down_light }}"
@@ -2541,12 +2590,20 @@ actions:
               - parallel:
                   - if: "{{ 'turn_on' in down_double_light_mode }}"
                     then:
-                      - action: light.turn_on
-                        target: "{{ down_light }}"
-                        data:
-                          brightness_pct: "{{ down_brightness_pct }}"
-                          color_temp_kelvin: "{{ down_color_temp_kelvin }}"
-                          transition: "{{ down_transition }}"
+                      - choose:
+                          - conditions: "{{ not down_use_previous }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ down_light }}"
+                                data:
+                                  brightness_pct: "{{ down_brightness_pct }}"
+                                  color_temp_kelvin: "{{ down_color_temp_kelvin }}"
+                                  transition: "{{ down_transition }}"
+                        default:
+                          - action: light.turn_on
+                            target: "{{ down_light }}"
+                            data:
+                              transition: "{{ down_transition }}"
                   - if: "{{ 'turn_off' in down_double_light_mode }}"
                     then:
                       - action: light.turn_off
@@ -2555,12 +2612,20 @@ actions:
                           transition: "{{ down_transition }}"
                   - if: "{{ 'toggle' in down_double_light_mode }}"
                     then:
-                      - action: light.toggle
-                        target: "{{ down_light }}"
-                        data:
-                          brightness_pct: "{{ down_brightness_pct }}"
-                          color_temp_kelvin: "{{ down_color_temp_kelvin }}"
-                          transition: "{{ down_transition }}"
+                      - choose:
+                          - conditions: "{{ not down_use_previous }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ down_light }}"
+                                data:
+                                  brightness_pct: "{{ down_brightness_pct }}"
+                                  color_temp_kelvin: "{{ down_color_temp_kelvin }}"
+                                  transition: "{{ down_transition }}"
+                        default:
+                          - action: light.toggle
+                            target: "{{ down_light }}"
+                            data:
+                              transition: "{{ down_transition }}"
       - conditions: "{{ command == 'hue_short_release' }}"
         sequence:
           - if: "{{ hue_has_light }}"
@@ -2569,7 +2634,7 @@ actions:
                   - if: "{{ 'turn_on' in hue_short_release_light_mode }}"
                     then:
                       - choose:
-                          - conditions: "{{ hue_short_release_reset_brightness and hue_short_release_reset_color }}"
+                          - conditions: "{{ not hue_use_previous and hue_short_release_reset_brightness and hue_short_release_reset_color }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ hue_light }}"
@@ -2577,14 +2642,14 @@ actions:
                                   brightness_pct: "{{ hue_brightness_pct }}"
                                   color_temp_kelvin: "{{ hue_color_temp_kelvin }}"
                                   transition: "{{ hue_transition }}"
-                          - conditions: "{{ hue_short_release_reset_brightness }}"
+                          - conditions: "{{ not hue_use_previous and hue_short_release_reset_brightness }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ hue_light }}"
                                 data:
                                   brightness_pct: "{{ hue_brightness_pct }}"
                                   transition: "{{ hue_transition }}"
-                          - conditions: "{{ hue_short_release_reset_color }}"
+                          - conditions: "{{ not hue_use_previous and hue_short_release_reset_color }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ hue_light }}"
@@ -2605,7 +2670,7 @@ actions:
                   - if: "{{ 'toggle' in hue_short_release_light_mode }}"
                     then:
                       - choose:
-                          - conditions: "{{ hue_short_release_reset_brightness and hue_short_release_reset_color }}"
+                          - conditions: "{{ not hue_use_previous and hue_short_release_reset_brightness and hue_short_release_reset_color }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ hue_light }}"
@@ -2613,14 +2678,14 @@ actions:
                                   brightness_pct: "{{ hue_brightness_pct }}"
                                   color_temp_kelvin: "{{ hue_color_temp_kelvin }}"
                                   transition: "{{ hue_transition }}"
-                          - conditions: "{{ hue_short_release_reset_brightness }}"
+                          - conditions: "{{ not hue_use_previous and hue_short_release_reset_brightness }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ hue_light }}"
                                 data:
                                   brightness_pct: "{{ hue_brightness_pct }}"
                                   transition: "{{ hue_transition }}"
-                          - conditions: "{{ hue_short_release_reset_color }}"
+                          - conditions: "{{ not hue_use_previous and hue_short_release_reset_color }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ hue_light }}"
@@ -2640,7 +2705,7 @@ actions:
                   - if: "{{ 'turn_on' in hue_long_release_light_mode }}"
                     then:
                       - choose:
-                          - conditions: "{{ hue_long_release_reset_brightness and hue_long_release_reset_color }}"
+                          - conditions: "{{ not hue_use_previous and hue_long_release_reset_brightness and hue_long_release_reset_color }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ hue_light }}"
@@ -2648,14 +2713,14 @@ actions:
                                   brightness_pct: "{{ hue_brightness_pct }}"
                                   color_temp_kelvin: "{{ hue_color_temp_kelvin }}"
                                   transition: "{{ hue_transition }}"
-                          - conditions: "{{ hue_long_release_reset_brightness }}"
+                          - conditions: "{{ not hue_use_previous and hue_long_release_reset_brightness }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ hue_light }}"
                                 data:
                                   brightness_pct: "{{ hue_brightness_pct }}"
                                   transition: "{{ hue_transition }}"
-                          - conditions: "{{ hue_long_release_reset_color }}"
+                          - conditions: "{{ not hue_use_previous and hue_long_release_reset_color }}"
                             sequence:
                               - action: light.turn_on
                                 target: "{{ hue_light }}"
@@ -2676,7 +2741,7 @@ actions:
                   - if: "{{ 'toggle' in hue_long_release_light_mode }}"
                     then:
                       - choose:
-                          - conditions: "{{ hue_long_release_reset_brightness and hue_long_release_reset_color }}"
+                          - conditions: "{{ not hue_use_previous and hue_long_release_reset_brightness and hue_long_release_reset_color }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ hue_light }}"
@@ -2684,14 +2749,14 @@ actions:
                                   brightness_pct: "{{ hue_brightness_pct }}"
                                   color_temp_kelvin: "{{ hue_color_temp_kelvin }}"
                                   transition: "{{ hue_transition }}"
-                          - conditions: "{{ hue_long_release_reset_brightness }}"
+                          - conditions: "{{ not hue_use_previous and hue_long_release_reset_brightness }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ hue_light }}"
                                 data:
                                   brightness_pct: "{{ hue_brightness_pct }}"
                                   transition: "{{ hue_transition }}"
-                          - conditions: "{{ hue_long_release_reset_color }}"
+                          - conditions: "{{ not hue_use_previous and hue_long_release_reset_color }}"
                             sequence:
                               - action: light.toggle
                                 target: "{{ hue_light }}"
@@ -2710,12 +2775,20 @@ actions:
               - parallel:
                   - if: "{{ 'turn_on' in hue_double_light_mode }}"
                     then:
-                      - action: light.turn_on
-                        target: "{{ hue_light }}"
-                        data:
-                          brightness_pct: "{{ hue_brightness_pct }}"
-                          color_temp_kelvin: "{{ hue_color_temp_kelvin }}"
-                          transition: "{{ hue_transition }}"
+                      - choose:
+                          - conditions: "{{ not hue_use_previous }}"
+                            sequence:
+                              - action: light.turn_on
+                                target: "{{ hue_light }}"
+                                data:
+                                  brightness_pct: "{{ hue_brightness_pct }}"
+                                  color_temp_kelvin: "{{ hue_color_temp_kelvin }}"
+                                  transition: "{{ hue_transition }}"
+                        default:
+                          - action: light.turn_on
+                            target: "{{ hue_light }}"
+                            data:
+                              transition: "{{ hue_transition }}"
                   - if: "{{ 'turn_off' in hue_double_light_mode }}"
                     then:
                       - action: light.turn_off
@@ -2724,9 +2797,17 @@ actions:
                           transition: "{{ hue_transition }}"
                   - if: "{{ 'toggle' in hue_double_light_mode }}"
                     then:
-                      - action: light.toggle
-                        target: "{{ hue_light }}"
-                        data:
-                          brightness_pct: "{{ hue_brightness_pct }}"
-                          color_temp_kelvin: "{{ hue_color_temp_kelvin }}"
-                          transition: "{{ hue_transition }}"
+                      - choose:
+                          - conditions: "{{ not hue_use_previous }}"
+                            sequence:
+                              - action: light.toggle
+                                target: "{{ hue_light }}"
+                                data:
+                                  brightness_pct: "{{ hue_brightness_pct }}"
+                                  color_temp_kelvin: "{{ hue_color_temp_kelvin }}"
+                                  transition: "{{ hue_transition }}"
+                        default:
+                          - action: light.toggle
+                            target: "{{ hue_light }}"
+                            data:
+                              transition: "{{ hue_transition }}"
