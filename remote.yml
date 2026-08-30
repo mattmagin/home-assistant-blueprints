@@ -27,7 +27,7 @@ blueprint:
     - **4 Buttons**: Short press, long press and double press, with built-in light actions
     - **Light Mode**: Control lights with brightness, color temperature, and transitions. Adjustment Mode can apply static, adaptive, or schedule values, or keep the previous brightness and color temperature.
     - **Switchable Brightness Buttons**: Run the up/down buttons as dimmers, or as ordinary buttons with their own light actions
-    - **Context-Aware Dimming**: In brightness mode the up/down buttons dim whichever button was last pressed, preferring a group that is still on when the last-pressed lights are off
+    - **Context-Aware Dimming**: In brightness mode the up/down buttons dim whichever button was last pressed, preferring a group that is still on when the last-pressed lights are off. After a configurable idle time the helper resets to the Power button, unless exactly one group is still on.
     - **Hold to Ramp**: Holding a brightness button steps repeatedly until you let go, at a configurable speed
     - **Adaptive Lighting Support**: Time-based brightness and color temperature via schedule helpers and adaptive lighting sensors
     - **Auto-Adjust**: Automatically update lights when adaptive or schedule values change, independently for brightness and color temperature
@@ -62,6 +62,8 @@ blueprint:
           - Removed: all remaining custom action slots. The blueprint is lights-only; button events now run Light Mode (and brightness control) only.
           - Added: "Previous" Light Adjustment Mode. Turn on / toggle leaves brightness and color temperature as the lights last had them, instead of applying static, adaptive, or schedule values.
           - Added: Prefer Lights That Are On. Dimming skips a last-pressed group that is fully off and retargets (and updates the helper) to another button whose lights are still on.
+          - Added: Stop Dimming at 1% per button. When enabled (the default), dimming that button's lights down clamps at 1% instead of turning them off.
+          - Added: Reset Last Pressed After Idle. After the helper is unchanged for 30 seconds (configurable), it returns to the Power button, unless exactly one light group is still on.
           - Removed: triple, quadruple and quintuple press. These were ZHA-only events; double press is synthesised on Z2M and remains.
           - Removed: all dial rotation logic, along with the per-button Dimming Speed inputs it used. Dimming Speed is now a single setting in Brightness Control.
           - Removed: all media player support.
@@ -168,6 +170,10 @@ blueprint:
         If **Prefer Lights That Are On** is enabled (the default) and the last-pressed
         button's lights are all off, dimming retargets to another button whose lights are
         still on and updates this helper to match.
+
+        If **Reset Last Pressed After Idle** is enabled (the default), the helper returns
+        to the Power (top) button after it has been unchanged for the configured idle time.
+        If exactly one button's lights are still on, that button is used instead.
 
         Until a button has been pressed the helper is empty, and dimming falls back to the
         Fallback Lights target, or to the Power button's lights if that is also empty.
@@ -368,6 +374,31 @@ blueprint:
           default: true
           selector:
             boolean: {}
+        reset_last_pressed:
+          name: Reset Last Pressed After Idle
+          description: |-
+            `optional` `boolean`
+
+            After the Last Pressed helper is unchanged for the idle time below, reset it
+            to the Power (top) button. If exactly one button's lights are still on, that
+            button wins instead.
+          default: true
+          selector:
+            boolean: {}
+        reset_last_pressed_delay:
+          name: Last Pressed Idle Time
+          description: |-
+            `optional` `number`
+
+            Seconds the Last Pressed helper must stay unchanged before it resets.
+          default: 30
+          selector:
+            number:
+              min: 5
+              max: 300
+              step: 5
+              unit_of_measurement: s
+              mode: slider
         brightness_fallback_light:
           name: Fallback Lights
           description: |-
@@ -596,6 +627,16 @@ blueprint:
               step: 30
               unit_of_measurement: s
               mode: slider
+        power_min_brightness_1:
+          name: Stop Dimming at 1%
+          description: |-
+            `optional` `boolean`
+
+            When this button's lights are being dimmed down, stop at 1% instead of
+            stepping to 0 and turning the lights off. Disable to allow dim-to-off.
+          default: true
+          selector:
+            boolean: {}
         power_short_release_reset_brightness:
           name: Reset Brightness on Short Release
           description: |-
@@ -846,6 +887,16 @@ blueprint:
               step: 30
               unit_of_measurement: s
               mode: slider
+        up_min_brightness_1:
+          name: Stop Dimming at 1%
+          description: |-
+            `optional` `boolean`
+
+            When this button's lights are being dimmed down, stop at 1% instead of
+            stepping to 0 and turning the lights off. Disable to allow dim-to-off.
+          default: true
+          selector:
+            boolean: {}
         up_short_release_reset_brightness:
           name: Reset Brightness on Short Release
           description: |-
@@ -1096,6 +1147,16 @@ blueprint:
               step: 30
               unit_of_measurement: s
               mode: slider
+        down_min_brightness_1:
+          name: Stop Dimming at 1%
+          description: |-
+            `optional` `boolean`
+
+            When this button's lights are being dimmed down, stop at 1% instead of
+            stepping to 0 and turning the lights off. Disable to allow dim-to-off.
+          default: true
+          selector:
+            boolean: {}
         down_short_release_reset_brightness:
           name: Reset Brightness on Short Release
           description: |-
@@ -1346,6 +1407,16 @@ blueprint:
               step: 30
               unit_of_measurement: s
               mode: slider
+        hue_min_brightness_1:
+          name: Stop Dimming at 1%
+          description: |-
+            `optional` `boolean`
+
+            When this button's lights are being dimmed down, stop at 1% instead of
+            stepping to 0 and turning the lights off. Disable to allow dim-to-off.
+          default: true
+          selector:
+            boolean: {}
         hue_short_release_reset_brightness:
           name: Reset Brightness on Short Release
           description: |-
@@ -1482,6 +1553,7 @@ variables:
   power_light_auto_adjust_brightness: !input power_light_auto_adjust_brightness
   power_light_auto_adjust_color_temp: !input power_light_auto_adjust_color_temp
   power_light_auto_adjust_transition: !input power_light_auto_adjust_transition
+  power_min_brightness_1: !input power_min_brightness_1
   power_light_entities: |-
     {% set ns = namespace(entities=[]) %}
     {% if power_light.entity_id is defined and power_light.entity_id | length > 0 %}
@@ -1571,6 +1643,7 @@ variables:
   up_light_auto_adjust_brightness: !input up_light_auto_adjust_brightness
   up_light_auto_adjust_color_temp: !input up_light_auto_adjust_color_temp
   up_light_auto_adjust_transition: !input up_light_auto_adjust_transition
+  up_min_brightness_1: !input up_min_brightness_1
   up_light_entities: |-
     {% set ns = namespace(entities=[]) %}
     {% if up_light.entity_id is defined and up_light.entity_id | length > 0 %}
@@ -1660,6 +1733,7 @@ variables:
   down_light_auto_adjust_brightness: !input down_light_auto_adjust_brightness
   down_light_auto_adjust_color_temp: !input down_light_auto_adjust_color_temp
   down_light_auto_adjust_transition: !input down_light_auto_adjust_transition
+  down_min_brightness_1: !input down_min_brightness_1
   down_light_entities: |-
     {% set ns = namespace(entities=[]) %}
     {% if down_light.entity_id is defined and down_light.entity_id | length > 0 %}
@@ -1749,6 +1823,7 @@ variables:
   hue_light_auto_adjust_brightness: !input hue_light_auto_adjust_brightness
   hue_light_auto_adjust_color_temp: !input hue_light_auto_adjust_color_temp
   hue_light_auto_adjust_transition: !input hue_light_auto_adjust_transition
+  hue_min_brightness_1: !input hue_min_brightness_1
   hue_light_entities: |-
     {% set ns = namespace(entities=[]) %}
     {% if hue_light.entity_id is defined and hue_light.entity_id | length > 0 %}
@@ -1779,6 +1854,8 @@ variables:
   brightness_speed: !input brightness_speed
   brightness_fallback_light: !input brightness_fallback_light
   prefer_on_lights: !input prefer_on_lights
+  reset_last_pressed: !input reset_last_pressed
+  reset_last_pressed_delay: !input reset_last_pressed_delay
   brightness_step_pct: "{{ (brightness_speed | int(5)) * 2 }}"
   brightness_hold_interval: 0.5
   brightness_hold_max_steps: 60
@@ -1812,6 +1889,20 @@ variables:
        dim_target.device_id | default([]) | length > 0 or
        dim_target.area_id | default([]) | length > 0 or
        dim_target.label_id | default([]) | length > 0 }}
+  dim_min_brightness: |-
+    {% if dim_button == 'power' %}{{ power_min_brightness_1 }}
+    {% elif dim_button == 'up' %}{{ up_min_brightness_1 }}
+    {% elif dim_button == 'down' %}{{ down_min_brightness_1 }}
+    {% elif dim_button == 'hue' %}{{ hue_min_brightness_1 }}
+    {% else %}false
+    {% endif %}
+  dim_entities: |-
+    {% if dim_button == 'power' %}{{ power_light_entities }}
+    {% elif dim_button == 'up' %}{{ up_light_entities }}
+    {% elif dim_button == 'down' %}{{ down_light_entities }}
+    {% elif dim_button == 'hue' %}{{ hue_light_entities }}
+    {% else %}[]
+    {% endif %}
 triggers:
   - trigger: mqtt
     topic: "{{ z2m_base_topic ~ '/' ~ z2m_device_name }}"
@@ -1852,6 +1943,11 @@ triggers:
   - trigger: state
     entity_id: !input hue_light_adaptive_color_temp
     id: adaptive_hue_color_change
+  - trigger: state
+    entity_id: !input last_pressed
+    for:
+      seconds: !input reset_last_pressed_delay
+    id: last_pressed_idle
 actions:
   - alias: Skip press-only events
     condition: template
@@ -1914,6 +2010,32 @@ actions:
         data:
           value: "{{ dim_button }}"
   - choose:
+      - conditions:
+          - "{{ trigger.id == 'last_pressed_idle' }}"
+          - "{{ reset_last_pressed | bool }}"
+        sequence:
+          - variables:
+              idle_target: |-
+                {% set ns = namespace(on=[]) %}
+                {% for b, ents in [
+                  ('power', power_light_entities),
+                  ('hue', hue_light_entities),
+                  ('up', up_light_entities),
+                  ('down', down_light_entities)
+                ] %}
+                  {% if ents | select('is_state', 'on') | list | length > 0 %}
+                    {% set ns.on = ns.on + [b] %}
+                  {% endif %}
+                {% endfor %}
+                {{ ns.on[0] if ns.on | length == 1 else 'power' }}
+          - if: "{{ idle_target != states(last_pressed) }}"
+            then:
+              - action: input_text.set_value
+                target:
+                  entity_id: "{{ last_pressed }}"
+                data:
+                  value: "{{ idle_target }}"
+          - stop: Last pressed idle reset
       - conditions:
           - "{{ trigger.id in ['adaptive_power_brightness_change', 'adaptive_power_color_change', 'adaptive_up_brightness_change', 'adaptive_up_color_change', 'adaptive_down_brightness_change', 'adaptive_down_color_change', 'adaptive_hue_brightness_change', 'adaptive_hue_color_change', 'schedule_power_change', 'schedule_up_change', 'schedule_down_change', 'schedule_hue_change'] }}"
         sequence:
@@ -2468,11 +2590,29 @@ actions:
         sequence:
           - if: "{{ down_button_mode == 'brightness' and dim_has_light }}"
             then:
-              - action: light.turn_on
-                target: "{{ dim_target }}"
-                data:
-                  brightness_step_pct: "-{{ brightness_step_pct }}"
-                  transition: "{{ brightness_hold_interval }}"
+              - choose:
+                  - conditions: "{{ dim_min_brightness | bool }}"
+                    sequence:
+                      - repeat:
+                          for_each: "{{ dim_entities }}"
+                          sequence:
+                            - if: "{{ is_state(repeat.item, 'on') }}"
+                              then:
+                                - action: light.turn_on
+                                  target:
+                                    entity_id: "{{ repeat.item }}"
+                                  data:
+                                    brightness_pct: |-
+                                      {% set cur = state_attr(repeat.item, 'brightness') | int(0) %}
+                                      {% set pct = (cur / 255 * 100) | int %}
+                                      {{ [1, pct - (brightness_step_pct | int)] | max }}
+                                    transition: "{{ brightness_hold_interval }}"
+                default:
+                  - action: light.turn_on
+                    target: "{{ dim_target }}"
+                    data:
+                      brightness_step_pct: "-{{ brightness_step_pct }}"
+                      transition: "{{ brightness_hold_interval }}"
           - if: "{{ down_has_light and down_button_mode == 'normal' }}"
             then:
               - parallel:
@@ -2549,11 +2689,29 @@ actions:
               - alias: Step brightness until the button is released
                 repeat:
                   sequence:
-                    - action: light.turn_on
-                      target: "{{ dim_target }}"
-                      data:
-                        brightness_step_pct: "-{{ brightness_step_pct }}"
-                        transition: "{{ brightness_hold_interval }}"
+                    - choose:
+                        - conditions: "{{ dim_min_brightness | bool }}"
+                          sequence:
+                            - repeat:
+                                for_each: "{{ dim_entities }}"
+                                sequence:
+                                  - if: "{{ is_state(repeat.item, 'on') }}"
+                                    then:
+                                      - action: light.turn_on
+                                        target:
+                                          entity_id: "{{ repeat.item }}"
+                                        data:
+                                          brightness_pct: |-
+                                            {% set cur = state_attr(repeat.item, 'brightness') | int(0) %}
+                                            {% set pct = (cur / 255 * 100) | int %}
+                                            {{ [1, pct - (brightness_step_pct | int)] | max }}
+                                          transition: "{{ brightness_hold_interval }}"
+                      default:
+                        - action: light.turn_on
+                          target: "{{ dim_target }}"
+                          data:
+                            brightness_step_pct: "-{{ brightness_step_pct }}"
+                            transition: "{{ brightness_hold_interval }}"
                     - wait_for_trigger:
                         - trigger: mqtt
                           topic: "{{ z2m_base_topic ~ '/' ~ z2m_device_name }}"
