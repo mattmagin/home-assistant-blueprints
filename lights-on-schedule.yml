@@ -1,0 +1,254 @@
+blueprint:
+  name: Two schedules and optional Zigbee2MQTT button
+  description: >
+    Control a light with two configurable daily schedule entries and
+    optionally toggle it from a Zigbee2MQTT button action sensor.
+  domain: automation
+
+  input:
+    target_light:
+      name: Light
+      selector:
+        entity:
+          domain: light
+
+    schedule_1_action:
+      name: Schedule 1 action
+      selector:
+        select:
+          options:
+            - Turn on
+            - Turn off
+
+    schedule_1_source:
+      name: Schedule 1 time source
+      selector:
+        select:
+          options:
+            - Manual time
+            - Sun event
+            - Helper
+
+    schedule_1_time:
+      name: Schedule 1 manual time
+      description: Used when Schedule 1 time source is Manual time.
+      default: "07:00:00"
+      selector:
+        time:
+
+    schedule_1_sun_event:
+      name: Schedule 1 sun event
+      description: Used when Schedule 1 time source is Sun event.
+      default: sunrise
+      selector:
+        select:
+          options:
+            - sunrise
+            - sunset
+
+    schedule_1_sun_offset:
+      name: Schedule 1 sun offset
+      description: For example, 00:15:00 or -00:10:00.
+      default: "00:00:00"
+      selector:
+        text:
+
+    schedule_1_helper:
+      name: Schedule 1 time helper
+      description: Used when Schedule 1 time source is Helper.
+      default: ""
+      selector:
+        entity:
+          domain: input_datetime
+
+    schedule_2_action:
+      name: Schedule 2 action
+      selector:
+        select:
+          options:
+            - Turn on
+            - Turn off
+
+    schedule_2_source:
+      name: Schedule 2 time source
+      selector:
+        select:
+          options:
+            - Manual time
+            - Sun event
+            - Helper
+
+    schedule_2_time:
+      name: Schedule 2 manual time
+      description: Used when Schedule 2 time source is Manual time.
+      default: "22:00:00"
+      selector:
+        time:
+
+    schedule_2_sun_event:
+      name: Schedule 2 sun event
+      description: Used when Schedule 2 time source is Sun event.
+      default: sunset
+      selector:
+        select:
+          options:
+            - sunrise
+            - sunset
+
+    schedule_2_sun_offset:
+      name: Schedule 2 sun offset
+      description: For example, 00:15:00 or -00:10:00.
+      default: "00:00:00"
+      selector:
+        text:
+
+    schedule_2_helper:
+      name: Schedule 2 time helper
+      description: Used when Schedule 2 time source is Helper.
+      default: ""
+      selector:
+        entity:
+          domain: input_datetime
+
+    button_action_sensor:
+      name: Optional Zigbee2MQTT button action sensor
+      description: >
+        Select the button's action entity, often named
+        sensor.<button_name>_action. Leave blank to disable button control.
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+
+mode: single
+
+trigger:
+  - platform: time_pattern
+    minutes: "/1"
+    id: schedule
+
+  # Listen for state changes, then filter to the optional button sensor below.
+  - platform: event
+    event_type: state_changed
+    id: button
+
+variables:
+  light_entity: !input target_light
+
+  s1_action: !input schedule_1_action
+  s1_source: !input schedule_1_source
+  s1_manual: !input schedule_1_time
+  s1_sun: !input schedule_1_sun_event
+  s1_offset: !input schedule_1_sun_offset
+  s1_helper: !input schedule_1_helper
+
+  s2_action: !input schedule_2_action
+  s2_source: !input schedule_2_source
+  s2_manual: !input schedule_2_time
+  s2_sun: !input schedule_2_sun_event
+  s2_offset: !input schedule_2_sun_offset
+  s2_helper: !input schedule_2_helper
+
+  button_entity: !input button_action_sensor
+
+  s1_target: >-
+    {% if s1_source == 'Manual time' %}
+      {{ today_at(s1_manual).strftime('%H:%M') }}
+    {% elif s1_source == 'Helper' and s1_helper != '' %}
+      {{ today_at(states(s1_helper)).strftime('%H:%M') }}
+    {% elif s1_source == 'Sun event' %}
+      {% set attr = 'next_rising' if s1_sun == 'sunrise' else 'next_setting' %}
+      {% set next_event = as_datetime(state_attr('sun.sun', attr)) %}
+      {% if next_event is not none %}
+        {% set event_today = next_event %}
+        {% if next_event.date() != now().date() %}
+          {% set event_today = next_event - timedelta(days=1) %}
+        {% endif %}
+        {{ (event_today + (s1_offset | trim | as_timedelta)).strftime('%H:%M') }}
+      {% else %}
+        unavailable
+      {% endif %}
+    {% else %}
+      unavailable
+    {% endif %}
+
+  s2_target: >-
+    {% if s2_source == 'Manual time' %}
+      {{ today_at(s2_manual).strftime('%H:%M') }}
+    {% elif s2_source == 'Helper' and s2_helper != '' %}
+      {{ today_at(states(s2_helper)).strftime('%H:%M') }}
+    {% elif s2_source == 'Sun event' %}
+      {% set attr = 'next_rising' if s2_sun == 'sunrise' else 'next_setting' %}
+      {% set next_event = as_datetime(state_attr('sun.sun', attr)) %}
+      {% if next_event is not none %}
+        {% set event_today = next_event %}
+        {% if next_event.date() != now().date() %}
+          {% set event_today = next_event - timedelta(days=1) %}
+        {% endif %}
+        {{ (event_today + (s2_offset | trim | as_timedelta)).strftime('%H:%M') }}
+      {% else %}
+        unavailable
+      {% endif %}
+    {% else %}
+      unavailable
+    {% endif %}
+
+action:
+  - choose:
+      # Optional physical button: toggle only when the selected action sensor
+      # changes to a non-empty action.
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.id == 'button'
+                 and button_entity != ''
+                 and trigger.event.data.entity_id == button_entity
+                 and trigger.event.data.new_state is not none
+                 and trigger.event.data.new_state.state not in
+                     ['', 'unknown', 'unavailable', 'None'] }}
+        sequence:
+          - service: light.toggle
+            target:
+              entity_id: "{{ light_entity }}"
+
+      # Schedule 1
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.id == 'schedule'
+                 and s1_target not in ['unavailable', 'unknown', '']
+                 and now().strftime('%H:%M') == s1_target }}
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ s1_action == 'Turn on' }}"
+                sequence:
+                  - service: light.turn_on
+                    target:
+                      entity_id: "{{ light_entity }}"
+            default:
+              - service: light.turn_off
+                target:
+                  entity_id: "{{ light_entity }}"
+
+      # Schedule 2
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.id == 'schedule'
+                 and s2_target not in ['unavailable', 'unknown', '']
+                 and now().strftime('%H:%M') == s2_target }}
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ s2_action == 'Turn on' }}"
+                sequence:
+                  - service: light.turn_on
+                    target:
+                      entity_id: "{{ light_entity }}"
+            default:
+              - service: light.turn_off
+                target:
+                  entity_id: "{{ light_entity }}"
